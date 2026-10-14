@@ -2,9 +2,13 @@
 {% block title %}Задача {{ job.id[:8] }}{% endblock %}
 {% block content %}
 <div class="page-header"><div><h1 class="page-title">Задача {{ job.job_type }}</h1><div class="page-subtitle">{{ job.status }} · {{ job.stage }}</div></div></div>
-<div class="card" hx-get="/deployments/{{ job.id }}/logs" hx-trigger="load, every 2s" hx-swap="innerHTML">
-  <div class="card-header"><div class="card-title">Лог</div></div>
-  <div class="card-body"><pre style="white-space:pre-wrap;font-size:12px;margin:0;">{% for line in logs %}{{ line }}
-{% endfor %}</pre></div>
+<div class="card">
+  <div class="card-header"><div class="card-title">Лог · {{ job.status }} · {{ job.stage }}</div></div>
+  <div class="card-body job-log-body">
+    <pre class="job-log-pre"
+         hx-get="/deployments/{{ job.id }}/logs"
+         hx-trigger="load, every 2s"
+         hx-swap="innerHTML">{% include "partials/job_log_text.html" %}</pre>
+  </div>
 </div>
 {% endblock %}

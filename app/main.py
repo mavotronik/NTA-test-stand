@@ -35,6 +35,10 @@ from app.deps import (
 )
 from app.repositories import (
     create_instance,
+    delete_db_profile,
+    delete_instance,
+    find_build_retry_instance,
+    get_build,
     get_db_profile,
     get_instance,
     list_audit,
@@ -268,6 +272,7 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
     if not inst:
         raise HTTPException(404)
     message = request.query_params.get("message", "").replace("+", " ")
+    error = request.query_params.get("error", "").replace("+", " ")
     with db.connection() as conn:
         jobs = [dict(r) for r in conn.execute(
             "SELECT * FROM deployment_jobs WHERE instance_id=? ORDER BY created_at DESC LIMIT 20",
@@ -283,6 +288,7 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
             "jobs": jobs,
             "public_host": settings.policy.public_host,
             "message": message,
+            "error": error,
         },
     )
 
@@ -401,9 +407,52 @@ async def instance_stop(
     return RedirectResponse(f"/instances/{instance_id}", status_code=302)
 
 
+@app.post("/instances/{instance_id}/delete")
+async def instance_delete(
+    request: Request,
+    instance_id: str,
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    docker = DockerService()
+    docker.stop_remove(f"grapes-test-{inst['slug']}")
+    try:
+        delete_instance(db, instance_id)
+    except ValueError as err:
+        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="instance_delete",
+        target_type="instance",
+        target_id=instance_id,
+        ip=_client_ip(request),
+    )
+    return RedirectResponse("/instances?message=instance+deleted", status_code=302)
+
+
 @app.get("/databases", response_class=HTMLResponse)
 async def databases_page(request: Request, db: Database = Depends(get_db), user=Depends(current_user)):
-    return _render(request, "databases.html", {"user": user, "active": "databases", "profiles": list_db_profiles(db)})
+    return _render(
+        request,
+        "databases.html",
+        {
+            "user": user,
+            "active": "databases",
+            "profiles": list_db_profiles(db),
+            "message": request.query_params.get("message", ""),
+            "error": request.query_params.get("error", ""),
+        },
+    )
 
 
 @app.get("/databases/new", response_class=HTMLResponse)
@@ -550,9 +599,86 @@ async def database_test(
     return RedirectResponse("/databases", status_code=302)
 
 
+@app.post("/databases/{profile_id}/delete")
+async def database_delete(
+    request: Request,
+    profile_id: str,
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    prof = get_db_profile(db, profile_id)
+    if not prof:
+        raise HTTPException(404)
+    try:
+        delete_db_profile(db, profile_id)
+    except ValueError as err:
+        return RedirectResponse(f"/databases?error={err}", status_code=302)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="db_profile_delete",
+        target_type="db_profile",
+        target_id=profile_id,
+        ip=_client_ip(request),
+    )
+    return RedirectResponse("/databases?message=profile+deleted", status_code=302)
+
+
 @app.get("/builds", response_class=HTMLResponse)
 async def builds_page(request: Request, db: Database = Depends(get_db), user=Depends(current_user)):
-    return _render(request, "builds.html", {"user": user, "active": "builds", "builds": list_builds(db)})
+    return _render(
+        request,
+        "builds.html",
+        {
+            "user": user,
+            "active": "builds",
+            "builds": list_builds(db),
+            "message": request.query_params.get("message", ""),
+            "error": request.query_params.get("error", ""),
+        },
+    )
+
+
+@app.post("/builds/{build_id}/retry")
+async def build_retry(
+    request: Request,
+    build_id: str,
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    build = get_build(db, build_id)
+    if not build:
+        raise HTTPException(404)
+    status = build.get("display_status") or build.get("status")
+    if status not in ("failed", "building"):
+        return RedirectResponse("/builds?error=retry+only+for+failed+builds", status_code=302)
+    instance_id = build.get("last_instance_id") or find_build_retry_instance(db, build_id)
+    if not instance_id:
+        return RedirectResponse("/builds?error=no+instance+for+retry", status_code=302)
+    try:
+        jid = queue_job(db, instance_id, "build", user["id"])
+    except ValueError:
+        return RedirectResponse("/builds?error=job+already+active", status_code=302)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="build_retry",
+        target_type="build",
+        target_id=build_id,
+        detail={"job_id": jid, "instance_id": instance_id},
+        ip=_client_ip(request),
+    )
+    return RedirectResponse(f"/deployments/{jid}", status_code=302)
 
 
 @app.get("/deployments", response_class=HTMLResponse)
@@ -579,7 +705,9 @@ async def deployment_logs_partial(request: Request, job_id: str, db: Database = 
         logs = [r["line"] for r in conn.execute(
             "SELECT line FROM job_logs WHERE job_id=? ORDER BY id", (job_id,)
         ).fetchall()]
-    return _render(request, "partials/job_logs.html", {"user": user, "job": dict(job), "logs": logs})
+    if not job:
+        raise HTTPException(404)
+    return _render(request, "partials/job_log_text.html", {"logs": logs})
 
 
 @app.get("/audit", response_class=HTMLResponse)

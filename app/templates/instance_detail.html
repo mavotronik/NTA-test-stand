@@ -36,10 +36,16 @@
       <button class="button" type="submit">Откатить образ</button>
     </form>
     {% endif %}
-    <form method="post" action="/instances/{{ instance.id }}/stop">
+    <form method="post" action="/instances/{{ instance.id }}/stop" style="margin-bottom:8px;">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
       <button class="button danger" type="submit">Остановить</button>
     </form>
+    {% if user.role in ('admin', 'operator') %}
+    <form method="post" action="/instances/{{ instance.id }}/delete" onsubmit="return confirm('Удалить инстанс {{ instance.name }}? Контейнер будет остановлен.');">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button class="button danger" type="submit">Удалить инстанс</button>
+    </form>
+    {% endif %}
   </div></div>
 </div>
 <div class="card" style="margin-top:18px;">

@@ -202,12 +202,153 @@ def list_jobs(db: Database, limit: int = 50) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def list_builds(db: Database, limit: int = 50) -> list[dict[str, Any]]:
+def reconcile_stale_builds(db: Database) -> None:
+    """Синхронизировать builds.status='building' с финальным статусом job."""
+    now = utc_now()
     with db.connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM builds ORDER BY created_at DESC LIMIT ?", (limit,)
+            """
+            SELECT b.id, b.status AS build_status, j.status AS job_status, j.error AS job_error
+            FROM builds b
+            JOIN deployment_jobs j ON j.build_id = b.id
+            WHERE b.status = 'building'
+              AND j.status IN ('failed', 'done')
+              AND j.id = (
+                SELECT j2.id FROM deployment_jobs j2
+                WHERE j2.build_id = b.id
+                ORDER BY j2.created_at DESC
+                LIMIT 1
+              )
+            """
         ).fetchall()
-    return [dict(r) for r in rows]
+        for row in rows:
+            if row["job_status"] == "failed":
+                conn.execute(
+                    """
+                    UPDATE builds SET status='failed', error=?, finished_at=COALESCE(finished_at, ?)
+                    WHERE id=?
+                    """,
+                    (row["job_error"] or "build failed", now, row["id"]),
+                )
+            elif row["job_status"] == "done":
+                conn.execute(
+                    """
+                    UPDATE builds SET status='ready', finished_at=COALESCE(finished_at, ?)
+                    WHERE id=? AND image_id != ''
+                    """,
+                    (now, row["id"]),
+                )
+
+
+def list_builds(db: Database, limit: int = 50) -> list[dict[str, Any]]:
+    reconcile_stale_builds(db)
+    with db.connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT b.*,
+              lj.id AS last_job_id,
+              lj.status AS last_job_status,
+              lj.instance_id AS last_instance_id,
+              i.name AS instance_name
+            FROM builds b
+            LEFT JOIN deployment_jobs lj ON lj.id = (
+              SELECT j.id FROM deployment_jobs j
+              WHERE j.build_id = b.id
+              ORDER BY j.created_at DESC
+              LIMIT 1
+            )
+            LEFT JOIN instances i ON i.id = lj.instance_id
+            ORDER BY b.created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        d["display_status"] = d["status"]
+        if d["status"] == "building" and d.get("last_job_status") == "failed":
+            d["display_status"] = "failed"
+        elif d["status"] == "building" and d.get("last_job_status") == "done":
+            d["display_status"] = "ready" if d.get("image_id") else "failed"
+        out.append(d)
+    return out
+
+
+def get_build(db: Database, build_id: str) -> dict[str, Any] | None:
+    builds = list_builds(db, limit=500)
+    for b in builds:
+        if b["id"] == build_id:
+            return b
+    return None
+
+
+def find_build_retry_instance(db: Database, build_id: str) -> str | None:
+    with db.connection() as conn:
+        row = conn.execute(
+            """
+            SELECT j.instance_id FROM deployment_jobs j
+            WHERE j.build_id=?
+            ORDER BY j.created_at DESC
+            LIMIT 1
+            """,
+            (build_id,),
+        ).fetchone()
+        if row:
+            return row["instance_id"]
+        build = conn.execute("SELECT git_commit FROM builds WHERE id=?", (build_id,)).fetchone()
+        if not build:
+            return None
+        row = conn.execute(
+            """
+            SELECT j.instance_id FROM deployment_jobs j
+            WHERE j.job_type='build'
+            ORDER BY j.created_at DESC
+            LIMIT 20
+            """,
+        ).fetchall()
+        for r in row:
+            iid = r["instance_id"]
+            inst = conn.execute("SELECT git_commit FROM instances WHERE id=?", (iid,)).fetchone()
+            if inst and (inst["git_commit"] or "").startswith((build["git_commit"] or "")[:12]):
+                return iid
+    return None
+
+
+def delete_instance(db: Database, instance_id: str) -> None:
+    with db.connection() as conn:
+        active = conn.execute(
+            """
+            SELECT 1 FROM deployment_jobs
+            WHERE instance_id=? AND status IN ('queued', 'running')
+            LIMIT 1
+            """,
+            (instance_id,),
+        ).fetchone()
+        if active:
+            raise ValueError("instance has active jobs")
+        conn.execute("DELETE FROM instances WHERE id=?", (instance_id,))
+
+
+def delete_db_profile(db: Database, profile_id: str) -> None:
+    with db.connection() as conn:
+        used = conn.execute(
+            "SELECT COUNT(*) AS c FROM instances WHERE db_profile_id=?", (profile_id,)
+        ).fetchone()["c"]
+        if used:
+            raise ValueError("profile in use by instances")
+        conn.execute("DELETE FROM db_profiles WHERE id=?", (profile_id,))
+
+
+def mark_build_failed(db: Database, build_id: str, error: str) -> None:
+    with db.connection() as conn:
+        conn.execute(
+            """
+            UPDATE builds SET status='failed', error=?, finished_at=COALESCE(finished_at, ?)
+            WHERE id=? AND status='building'
+            """,
+            (error[:2000], utc_now(), build_id),
+        )
 
 
 def list_audit(db: Database, limit: int = 100) -> list[dict[str, Any]]:

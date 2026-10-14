@@ -7,7 +7,12 @@
     <div class="page-subtitle">Инстансы и состояние хоста</div>
   </div>
 </div>
-{% include "partials/host_metrics.html" %}
+<div id="host-metrics-panel"
+     hx-get="/partials/host-metrics"
+     hx-trigger="load, every {{ refresh_sec|default(5) }}s"
+     hx-swap="innerHTML">
+  {% include "partials/host_metrics.html" %}
+</div>
 <section class="metrics" style="margin-bottom:18px;">
   <div class="card metric">
     <div class="metric-label">Инстансы</div>

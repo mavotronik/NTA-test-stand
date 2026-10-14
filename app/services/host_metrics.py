@@ -94,17 +94,26 @@ def _disk_usage_paths(paths: list[str]) -> list[dict[str, Any]]:
 
 
 class HostMetricsCollector:
+    _CPU_EMA_ALPHA = 0.35
+
     def __init__(self, host_proc: Path, disk_paths: list[str]) -> None:
         self.host_proc = host_proc if (host_proc / "stat").exists() else Path("/proc")
         self.disk_paths = disk_paths
         self._last_idle: float | None = None
         self._last_total: float | None = None
+        self._cpu_ema: float | None = None
 
     def snapshot(self) -> HostMetricsSnapshot:
         load_1, load_5, load_15 = _read_loadavg(self.host_proc)
         mem_pct, mem_used, mem_total = _read_meminfo(self.host_proc)
-        cpu, idle, total = _read_cpu_percent(self.host_proc, self._last_idle, self._last_total)
+        cpu_raw, idle, total = _read_cpu_percent(self.host_proc, self._last_idle, self._last_total)
         self._last_idle, self._last_total = idle, total
+        if self._cpu_ema is None:
+            self._cpu_ema = cpu_raw
+        else:
+            a = self._CPU_EMA_ALPHA
+            self._cpu_ema = a * cpu_raw + (1.0 - a) * self._cpu_ema
+        cpu = self._cpu_ema
         return HostMetricsSnapshot(
             cpu_percent=round(cpu, 1),
             memory_percent=round(mem_pct, 1),

@@ -6,6 +6,7 @@
   <div class="page-actions"><a class="button primary" href="/databases/new">Добавить</a></div>
 </div>
 {% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
+{% if error %}<p style="color:var(--danger);">{{ error }}</p>{% endif %}
 <div class="card">
   <div class="table-wrapper">
     <table>
@@ -24,6 +25,12 @@
             <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
             <button class="button" type="submit">Проверить</button>
           </form>
+          {% if user.role in ('admin', 'operator') %}
+          <form method="post" action="/databases/{{ p.id }}/delete" style="display:inline;" onsubmit="return confirm('Удалить профиль {{ p.name }}?');">
+            <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+            <button class="button danger" type="submit">Удалить</button>
+          </form>
+          {% endif %}
         </td>
       </tr>
       {% else %}

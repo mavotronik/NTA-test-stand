@@ -470,6 +470,22 @@
             color: var(--text-secondary);
         }
 
+        .job-log-body {
+            padding: 0 !important;
+        }
+
+        .job-log-pre {
+            white-space: pre-wrap;
+            font-size: 12px;
+            line-height: 1.45;
+            margin: 0;
+            padding: 14px 16px;
+            max-height: 480px;
+            overflow: auto;
+            border: none;
+            background: color-mix(in srgb, var(--surface) 92%, var(--text-primary));
+        }
+
         /* =====================================================
            ANIMATIONS
         ===================================================== */

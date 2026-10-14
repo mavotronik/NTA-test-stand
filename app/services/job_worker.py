@@ -110,6 +110,7 @@ class JobWorker:
 
     def _run_build(self, job: dict) -> None:
         job_id = job["id"]
+        active_build_id: str | None = None
         self._set_job(job_id, "running", "resolve_commit")
         try:
             repo = Path(self.settings.policy.git_remote_url)
@@ -128,6 +129,7 @@ class JobWorker:
                 self._set_job(job_id, "done", "ready", build_id=existing["id"])
                 return
             build_id = job.get("build_id") or new_id()
+            active_build_id = build_id
             tag = f"grapes-nta-test:{commit[:12]}"
             self._set_job(job_id, "running", "docker_build", build_id=build_id)
             with self.db.connection() as conn:
@@ -171,6 +173,10 @@ class JobWorker:
             self._set_job(job_id, "done", "ready", build_id=build_id)
         except Exception as err:
             append_job_log(self.db, job_id, f"ERROR: {err}")
+            if active_build_id:
+                from app.repositories import mark_build_failed
+
+                mark_build_failed(self.db, active_build_id, str(err))
             self._set_job(job_id, "failed", "error", error=str(err))
 
     def _run_deploy(self, job: dict) -> None:

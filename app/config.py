@@ -71,7 +71,7 @@ def load_policy_from_mapping(data: Mapping[str, Any], *, config_dir: Path | None
         deploy_max_parallel=int(deploy.get("max_parallel", 2)),
         health_timeout_sec=int(deploy.get("health_timeout_sec", 120)),
         health_interval_sec=int(deploy.get("health_interval_sec", 3)),
-        host_metrics_refresh_sec=float(hm.get("refresh_sec", 2)),
+        host_metrics_refresh_sec=float(hm.get("refresh_sec", 5)),
         host_disk_paths=list(hm.get("disk_paths") or ["/"]),
     )
 

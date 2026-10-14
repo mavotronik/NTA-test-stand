@@ -21,5 +21,16 @@
       localStorage.setItem('dashboard-theme', next);
     });
   }
-  document.body.addEventListener('htmx:csrfToken', () => {});
+  document.body.addEventListener('htmx:beforeSwap', (evt) => {
+    const pre = evt.detail.target;
+    if (!pre?.classList?.contains('job-log-pre')) return;
+    pre.dataset.logScrollTop = String(pre.scrollTop);
+  });
+  document.body.addEventListener('htmx:afterSwap', (evt) => {
+    const pre = evt.detail.target;
+    if (!pre?.classList?.contains('job-log-pre')) return;
+    if (pre.dataset.logScrollTop) {
+      pre.scrollTop = Number(pre.dataset.logScrollTop);
+    }
+  });
 })();

@@ -53,7 +53,7 @@ deploy:
   health_interval_sec: 3
 
 host_metrics:
-  refresh_sec: 2
+  refresh_sec: 5
   disk_paths:
     - /
     - /var/lib/grapes-test-manager
