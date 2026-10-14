@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Пользователи</h1></div></div>
+{% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
+<div class="grid-2">
+  <div class="card"><div class="card-header"><div class="card-title">Список</div></div><div class="table-wrapper"><table>
+  <thead><tr><th>Login</th><th>Role</th><th>Active</th></tr></thead>
+  <tbody>{% for u in users %}<tr><td>{{ u.username }}</td><td>{{ u.role }}</td><td>{{ u.active }}</td></tr>{% endfor %}</tbody>
+  </table></div></div>
+  <div class="card"><div class="card-header"><div class="card-title">Создать</div></div><div class="card-body">
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <div class="form-group"><label class="form-label">Login</label><input class="input" name="username" required></div>
+      <div class="form-group"><label class="form-label">Password</label><input class="input" type="password" name="password" required></div>
+      <div class="form-group"><label class="form-label">Role</label>
+        <select class="select" name="role"><option value="viewer">viewer</option><option value="operator">operator</option><option value="admin">admin</option></select>
+      </div>
+      <button class="button primary" type="submit">Создать</button>
+    </form>
+  </div></div>
+</div>
+{% endblock %}

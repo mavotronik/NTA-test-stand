@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Базы данных{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1 class="page-title">Профили ClickHouse</h1></div>
+  <div class="page-actions"><a class="button primary" href="/databases/new">Добавить</a></div>
+</div>
+{% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
+<div class="card">
+  <div class="table-wrapper">
+    <table>
+      <thead><tr><th>Имя</th><th>Host</th><th>БД</th><th>Writable</th><th>Проверка</th><th></th></tr></thead>
+      <tbody>
+      {% for p in profiles %}
+      <tr>
+        <td>{{ p.name }}</td>
+        <td>{{ p.host }}:{{ p.port }}</td>
+        <td>{{ p.database_name }}</td>
+        <td>{{ 'да' if p.writable else 'нет' }}</td>
+        <td>{% if p.last_check_ok %}<span class="status"><span class="status-dot status-online"></span>OK</span>{% elif p.last_check_at %}<span class="status"><span class="status-dot status-offline"></span>fail</span>{% else %}—{% endif %}</td>
+        <td>
+          <a class="button" href="/databases/{{ p.id }}/edit">Изменить</a>
+          <form method="post" action="/databases/{{ p.id }}/test" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+            <button class="button" type="submit">Проверить</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">Нет профилей</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

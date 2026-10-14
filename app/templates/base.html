@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Test Stand Manager{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+{% if user %}
+<header class="header">
+  <div class="header-left">
+    <button class="icon-button" type="button" id="menuButton" title="Меню"><span class="mdi mdi-menu"></span></button>
+    <div class="logo">
+      <div class="logo-icon"><span class="mdi mdi-server-network"></span></div>
+      <span>Test Stand Manager</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <button class="icon-button" type="button" id="themeButton" title="Тема"><span class="mdi mdi-theme-light-dark"></span></button>
+    <span class="status" style="margin-right:8px;font-size:13px;">{{ user.username }} ({{ user.role }})</span>
+    <form method="post" action="/logout" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button class="icon-button" type="submit" title="Выход"><span class="mdi mdi-logout"></span></button>
+    </form>
+  </div>
+</header>
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-title">Основное</div>
+    <a class="nav-item {% if active=='overview' %}active{% endif %}" href="/"><span class="mdi mdi-view-dashboard-outline"></span><span class="nav-label">Обзор</span></a>
+    <a class="nav-item {% if active=='instances' %}active{% endif %}" href="/instances"><span class="mdi mdi-server-outline"></span><span class="nav-label">Инстансы</span></a>
+    <a class="nav-item {% if active=='databases' %}active{% endif %}" href="/databases"><span class="mdi mdi-database-outline"></span><span class="nav-label">Базы данных</span></a>
+    <a class="nav-item {% if active=='builds' %}active{% endif %}" href="/builds"><span class="mdi mdi-docker"></span><span class="nav-label">Сборки</span></a>
+    <a class="nav-item {% if active=='deployments' %}active{% endif %}" href="/deployments"><span class="mdi mdi-rocket-launch-outline"></span><span class="nav-label">Развёртывания</span></a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-title">Система</div>
+    <a class="nav-item {% if active=='audit' %}active{% endif %}" href="/audit"><span class="mdi mdi-file-document-outline"></span><span class="nav-label">Аудит</span></a>
+    {% if user.role == 'admin' %}
+    <a class="nav-item {% if active=='users' %}active{% endif %}" href="/users"><span class="mdi mdi-account-group-outline"></span><span class="nav-label">Пользователи</span></a>
+    {% endif %}
+  </div>
+</aside>
+<main class="main">
+  <div class="content">
+{% else %}
+<main class="main" style="padding-left:0;padding-top:0;">
+  <div class="content">
+{% endif %}
+    {% block content %}{% endblock %}
+  </div>
+</main>
+{% if user %}
+<div class="toast-container" id="toastContainer"></div>
+<script src="/static/app.js"></script>
+{% endif %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

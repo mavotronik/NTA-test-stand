@@ -1,0 +1,3 @@
+<div class="card-header"><div class="card-title">Лог · {{ job.status }}</div></div>
+<div class="card-body"><pre style="white-space:pre-wrap;font-size:12px;margin:0;max-height:480px;overflow:auto;">{% for line in logs %}{{ line }}
+{% endfor %}</pre></div>

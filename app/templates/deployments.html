@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Развёртывания{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Развёртывания</h1></div></div>
+<div class="card"><div class="table-wrapper"><table>
+<thead><tr><th>Инстанс</th><th>Тип</th><th>Статус</th><th>Этап</th><th>Создана</th><th></th></tr></thead>
+<tbody>
+{% for j in jobs %}
+<tr>
+  <td>{{ j.instance_name }}</td><td>{{ j.job_type }}</td><td>{{ j.status }}</td><td>{{ j.stage }}</td><td>{{ j.created_at }}</td>
+  <td><a href="/deployments/{{ j.id }}">Логи</a></td>
+</tr>
+{% else %}<tr><td colspan="6">Нет задач</td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endblock %}

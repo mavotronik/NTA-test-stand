@@ -1,0 +1,55 @@
+# Скопируйте в config.yaml и отредактируйте (файл не коммитится).
+
+manager:
+  host: 127.0.0.1
+  port: 8090
+  data_dir: ./data
+  host_proc: /host/proc
+  session_ttl_hours: 24
+  secret_key: change-me-in-production
+  # Опционально; если пусто — производный ключ из secret_key
+  fernet_key: ""
+  bootstrap_admin_user: admin
+  bootstrap_admin_password: "admin"
+  skip_worker: false
+
+git:
+  remote_url: /home/mavotronik/work/GrapesNTA
+  allowed_branch_patterns:
+    - main
+    - develop
+    - "feature/*"
+    - "test-stand/*"
+    - "ui/*"
+
+ports:
+  min: 3100
+  max: 3199
+
+storage_root: ./data/root
+
+public_host: 127.0.0.1
+
+clickhouse:
+  allowed_host_cidrs:
+    - 127.0.0.0/8
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  connect_timeout_sec: 5
+
+build:
+  max_parallel: 2
+  ui_dockerfile: deploy/ui/app/Dockerfile
+  ui_context: deploy/ui/app
+
+deploy:
+  max_parallel: 2
+  health_timeout_sec: 120
+  health_interval_sec: 3
+
+host_metrics:
+  refresh_sec: 2
+  disk_paths:
+    - /
+    - /var/lib/grapes-test-manager

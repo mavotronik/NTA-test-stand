@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ instance.name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">{{ instance.name }}</h1>
+    <div class="page-subtitle">{{ instance.slug }} · {{ instance.state }}</div>
+  </div>
+  <div class="page-actions">
+    <a class="button" href="http://{{ public_host }}:{{ instance.port }}/" target="_blank" rel="noopener">Открыть UI</a>
+  </div>
+</div>
+{% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
+{% if error %}<p style="color:var(--danger);">{{ error }}</p>{% endif %}
+<div class="grid-2">
+  <div class="card"><div class="card-header"><div class="card-title">Конфигурация</div></div><div class="card-body">
+    <p>Порт: <strong>{{ instance.port }}</strong></p>
+    <p>БД: <strong>{{ instance.db_profile_name }}</strong></p>
+    <p>Ветка: <strong>{{ instance.git_branch }}</strong></p>
+    <p>Commit: <code>{{ instance.git_commit or '—' }}</code></p>
+    <p>Образ: <code>{{ instance.image_tag or '—' }}</code></p>
+    <p>Контейнер: <code>{{ instance.container_id[:12] if instance.container_id else '—' }}</code></p>
+  </div></div>
+  <div class="card"><div class="card-header"><div class="card-title">Действия</div></div><div class="card-body">
+    <form method="post" action="/instances/{{ instance.id }}/build" style="margin-bottom:8px;">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button class="button" type="submit">Собрать образ</button>
+    </form>
+    <form method="post" action="/instances/{{ instance.id }}/deploy" style="margin-bottom:8px;">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button class="button primary" type="submit">Развернуть</button>
+    </form>
+    {% if instance.rollback_image_tag %}
+    <form method="post" action="/instances/{{ instance.id }}/rollback" style="margin-bottom:8px;">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button class="button" type="submit">Откатить образ</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/instances/{{ instance.id }}/stop">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button class="button danger" type="submit">Остановить</button>
+    </form>
+  </div></div>
+</div>
+<div class="card" style="margin-top:18px;">
+  <div class="card-header"><div class="card-title">Задачи</div></div>
+  <div class="table-wrapper">
+    <table>
+      <thead><tr><th>ID</th><th>Тип</th><th>Статус</th><th>Этап</th><th>Создана</th><th></th></tr></thead>
+      <tbody>
+      {% for j in jobs %}
+      <tr>
+        <td>{{ j.id[:10] }}…</td><td>{{ j.job_type }}</td><td>{{ j.status }}</td><td>{{ j.stage }}</td><td>{{ j.created_at }}</td>
+        <td><a href="/deployments/{{ j.id }}">Логи</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">Нет задач</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Сборки{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Сборки</h1></div></div>
+<div class="card"><div class="table-wrapper"><table>
+<thead><tr><th>Commit</th><th>Status</th><th>Image</th><th>Created</th></tr></thead>
+<tbody>
+{% for b in builds %}
+<tr><td>{{ b.git_commit[:12] }}</td><td>{{ b.status }}</td><td><code>{{ b.image_tag }}</code></td><td>{{ b.created_at }}</td></tr>
+{% else %}<tr><td colspan="4">Пока нет сборок</td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endblock %}

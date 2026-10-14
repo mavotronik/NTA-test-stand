@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Обзор{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Обзор</h1>
+    <div class="page-subtitle">Инстансы и состояние хоста</div>
+  </div>
+</div>
+{% include "partials/host_metrics.html" %}
+<section class="metrics" style="margin-bottom:18px;">
+  <div class="card metric">
+    <div class="metric-label">Инстансы</div>
+    <div class="metric-value">{{ instances|length }}</div>
+  </div>
+  <div class="card metric">
+    <div class="metric-label">Running</div>
+    <div class="metric-value">{{ running_count }}</div>
+  </div>
+  <div class="card metric">
+    <div class="metric-label">Failed</div>
+    <div class="metric-value">{{ failed_count }}</div>
+  </div>
+  <div class="card metric">
+    <div class="metric-label">Задачи в очереди</div>
+    <div class="metric-value">{{ queued_jobs }}</div>
+  </div>
+</section>
+<div class="card">
+  <div class="card-header"><div class="card-title">Инстансы</div></div>
+  <div class="table-wrapper">
+    <table>
+      <thead><tr><th>Имя</th><th>Состояние</th><th>Порт</th><th>БД</th><th>Commit</th><th></th></tr></thead>
+      <tbody>
+      {% for i in instances %}
+      <tr>
+        <td>{{ i.name }}</td>
+        <td><span class="status"><span class="status-dot status-{{ 'online' if i.state=='running' else ('warning' if i.state=='deploying' else 'offline') }}"></span>{{ i.state }}</span></td>
+        <td>{{ i.port }}</td>
+        <td>{{ i.db_profile_name }}</td>
+        <td>{{ (i.git_commit or '')[:12] }}</td>
+        <td><a class="button" href="/instances/{{ i.id }}">Открыть</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">Нет инстансов</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
