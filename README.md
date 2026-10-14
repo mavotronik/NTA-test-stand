@@ -12,10 +12,12 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp config.example.yaml config.yaml
 # отредактируйте config.yaml: manager.bootstrap_admin_password, git.remote_url, storage_root
-uvicorn app.main:app --host 127.0.0.1 --port 8080
+python -m app
 ```
 
-Откройте http://127.0.0.1:8080 — логин `admin`, пароль из `manager.bootstrap_admin_password`.
+Порт и bind — из `manager.port` и `manager.host` в config.yaml (пример: 8090).
+
+Откройте UI на порту из `manager.port` — логин `admin`, пароль из `manager.bootstrap_admin_password`.
 
 Путь к конфигу можно переопределить: `CONFIG_FILE=/path/to/config.yaml`.
 

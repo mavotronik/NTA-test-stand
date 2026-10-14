@@ -27,6 +27,11 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(host_allowed(policy, "127.0.0.1"))
         self.assertFalse(host_allowed(policy, "8.8.8.8"))
 
+    def test_host_allowlist_disabled_when_cidrs_omitted(self):
+        policy = load_policy_from_mapping({"clickhouse": {}})
+        self.assertTrue(host_allowed(policy, "8.8.8.8"))
+        self.assertTrue(host_allowed(policy, "clickhouse.example.com"))
+
     def test_reject_duplicate_manager_section(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "config.yaml"

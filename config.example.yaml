@@ -1,6 +1,7 @@
 # Скопируйте в config.yaml и отредактируйте (файл не коммитится).
 
 manager:
+  # host: 127.0.0.1 локально; 0.0.0.0 в Docker.
   host: 127.0.0.1
   port: 8090
   # Локально: ./data (относительно каталога config.yaml).
@@ -9,10 +10,11 @@ manager:
   host_proc: /host/proc
   session_ttl_hours: 24
   secret_key: change-me-in-production
-  # Опционально; если пусто — производный ключ из secret_key
+  # Опционально; если пусто —# Данные UI-инстансов на хосте → bind /app/server/data (как UI_DATA_DIR в deploy/ui).
+# В Compose: /data/root. Локально: ./data/root. производный ключ из secret_key
   fernet_key: ""
   bootstrap_admin_user: admin
-  bootstrap_admin_password: "admin"
+  bootstrap_admin_password: "very_strong_and_secure_password-(not)"
   skip_worker: false
 
 git:
@@ -28,13 +30,12 @@ ports:
   min: 3100
   max: 3199
 
-# Данные UI-инстансов на хосте → bind /app/server/data (как UI_DATA_DIR в deploy/ui).
-# В Compose: /data/root. Локально: ./data/root.
-storage_root: ./data/root
+storage_root: /data/root
 
 public_host: 127.0.0.1
 
 clickhouse:
+  # Не указывайте или оставьте [] — проверка host ClickHouse без фильтра по CIDR.
   allowed_host_cidrs:
     - 127.0.0.0/8
     - 10.0.0.0/8

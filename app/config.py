@@ -63,7 +63,9 @@ def load_policy_from_mapping(data: Mapping[str, Any], *, config_dir: Path | None
             resolve_config_path(base, str(data.get("storage_root", "/var/lib/grapes-test-manager")))
         ),
         public_host=str(data.get("public_host", "127.0.0.1")),
-        clickhouse_cidrs=_parse_cidrs(list(ch.get("allowed_host_cidrs") or ["127.0.0.0/8"])),
+        clickhouse_cidrs=_parse_cidrs(list(ch.get("allowed_host_cidrs") or []))
+        if ch.get("allowed_host_cidrs")
+        else [],
         ch_connect_timeout_sec=int(ch.get("connect_timeout_sec", 5)),
         build_max_parallel=int(build.get("max_parallel", 2)),
         ui_dockerfile=str(build.get("ui_dockerfile", "deploy/ui/app/Dockerfile")),
@@ -92,6 +94,8 @@ def branch_allowed(policy: Policy, branch: str) -> bool:
 
 
 def host_allowed(policy: Policy, host: str) -> bool:
+    if not policy.clickhouse_cidrs:
+        return True
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:

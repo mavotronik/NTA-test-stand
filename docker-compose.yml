@@ -11,8 +11,9 @@ services:
     restart: unless-stopped
     environment:
       CONFIG_FILE: /config/config.yaml
+    # Публикуемый порт должен совпадать с manager.port в config.yaml.
     ports:
-      - "8080:8080"
+      - "${MANAGER_PUBLISH:-8090}:${MANAGER_PUBLISH:-8090}"
     volumes:
       - ./config.yaml:/config/config.yaml:ro
       - ./data:/data
@@ -25,7 +26,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health').read()",
+          "from app.config import load_settings; import urllib.request; s=load_settings(); urllib.request.urlopen('http://127.0.0.1:'+str(s.port)+'/api/health').read()",
         ]
       interval: 30s
       timeout: 5s
