@@ -39,7 +39,15 @@ def _parse_cidrs(raw: list[str]) -> list[ipaddress._BaseNetwork]:
     return out
 
 
-def load_policy_from_mapping(data: Mapping[str, Any]) -> Policy:
+def resolve_config_path(config_dir: Path, raw: str) -> Path:
+    path = Path(raw)
+    if path.is_absolute():
+        return path.resolve()
+    return (config_dir / path).resolve()
+
+
+def load_policy_from_mapping(data: Mapping[str, Any], *, config_dir: Path | None = None) -> Policy:
+    base = (config_dir or Path.cwd()).resolve()
     git = data.get("git") or {}
     ports = data.get("ports") or {}
     ch = data.get("clickhouse") or {}
@@ -51,7 +59,9 @@ def load_policy_from_mapping(data: Mapping[str, Any]) -> Policy:
         allowed_branch_patterns=list(git.get("allowed_branch_patterns") or ["main"]),
         port_min=int(ports.get("min", 3100)),
         port_max=int(ports.get("max", 3199)),
-        storage_root=str(data.get("storage_root", "/var/lib/grapes-test-manager")),
+        storage_root=str(
+            resolve_config_path(base, str(data.get("storage_root", "/var/lib/grapes-test-manager")))
+        ),
         public_host=str(data.get("public_host", "127.0.0.1")),
         clickhouse_cidrs=_parse_cidrs(list(ch.get("allowed_host_cidrs") or ["127.0.0.0/8"])),
         ch_connect_timeout_sec=int(ch.get("connect_timeout_sec", 5)),
@@ -116,6 +126,9 @@ class Settings:
     def instances_dir(self) -> Path:
         return Path(self.policy.storage_root) / "instances"
 
+    def instance_ui_data_dir(self, slug: str) -> Path:
+        return self.instances_dir / slug / "data"
+
     # Совместимость со старым именем поля
     @property
     def policy_file(self) -> Path:
@@ -130,15 +143,22 @@ def load_config_mapping(path: Path | None = None) -> dict[str, Any]:
     cfg_path = path or config_file_path()
     if not cfg_path.exists():
         raise FileNotFoundError(f"config not found: {cfg_path}")
-    return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    text = cfg_path.read_text(encoding="utf-8")
+    if text.count(f"{MANAGER_KEY}:") > 1:
+        raise ValueError(
+            f"{cfg_path}: несколько секций '{MANAGER_KEY}:' — YAML оставит только последнюю; "
+            f"объедините в один блок (иначе пропадут bootstrap_admin_password и secret_key)"
+        )
+    return yaml.safe_load(text) or {}
 
 
 def load_settings(path: Path | None = None) -> Settings:
     cfg_path = path or config_file_path()
     data = load_config_mapping(cfg_path)
     mgr = data.get(MANAGER_KEY) or {}
-    policy = load_policy_from_mapping(data)
-    data_dir = Path(str(mgr.get("data_dir", "./data")))
+    cfg_dir = cfg_path.parent.resolve()
+    policy = load_policy_from_mapping(data, config_dir=cfg_dir)
+    data_dir = resolve_config_path(cfg_dir, str(mgr.get("data_dir", "./data")))
     data_dir.mkdir(parents=True, exist_ok=True)
     fernet_raw = str(mgr.get("fernet_key", "") or "").strip()
     fernet_key = fernet_raw.encode("utf-8") if fernet_raw else None

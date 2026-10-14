@@ -303,7 +303,7 @@ async def instance_rollback(
         raise HTTPException(400, "nothing to rollback")
     name = f"grapes-test-{inst['slug']}"
     docker = DockerService()
-    data_dir = settings.instances_dir / inst["slug"] / "data"
+    data_dir = settings.instance_ui_data_dir(inst["slug"])
     prof = get_db_profile(db, inst["db_profile_id"], include_secret=True)
     if not prof:
         raise HTTPException(400, "profile missing")

@@ -3,6 +3,8 @@
 manager:
   host: 127.0.0.1
   port: 8090
+  # Локально: ./data (относительно каталога config.yaml).
+  # В Docker Compose менеджера: /data (volume ./data:/data).
   data_dir: ./data
   host_proc: /host/proc
   session_ttl_hours: 24
@@ -26,6 +28,8 @@ ports:
   min: 3100
   max: 3199
 
+# Данные UI-инстансов на хосте → bind /app/server/data (как UI_DATA_DIR в deploy/ui).
+# В Compose: /data/root. Локально: ./data/root.
 storage_root: ./data/root
 
 public_host: 127.0.0.1

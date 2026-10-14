@@ -1,14 +1,32 @@
 from __future__ import annotations
 
 import io
+import os
+import shutil
+import subprocess
 import tarfile
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import docker
 from docker.errors import NotFound
 from docker.models.containers import Container
+
+# uid/gid пользователя app в образе deploy/ui/app/Dockerfile (как в deploy/deploy.sh ui_up)
+UI_APP_UID = 1001
+UI_APP_GID = 1001
+
+
+def prepare_ui_data_mount(host_dir: Path) -> Path:
+    """Каталог на хосте для bind-mount в /app/server/data (sessions.db и пр.)."""
+    host_dir = host_dir.resolve()
+    host_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chown(host_dir, UI_APP_UID, UI_APP_GID)
+    except OSError:
+        pass
+    return host_dir
 
 
 def _read_dockerignore(context: Path) -> set[str]:
@@ -68,6 +86,79 @@ class DockerService:
     def __init__(self) -> None:
         self._client = None
 
+    @staticmethod
+    def can_compose_ui_build(ui_dir: Path) -> bool:
+        ui_dir = ui_dir.resolve()
+        if not (ui_dir / "docker-compose.yml").is_file():
+            return False
+        if not (ui_dir / "app" / "Dockerfile").is_file():
+            return False
+        if not shutil.which("docker"):
+            return False
+        proc = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return proc.returncode == 0
+
+    def build_ui_image_compose(
+        self,
+        ui_dir: Path,
+        tag: str,
+        *,
+        build_date: str,
+        log_callback: Callable[[str], None] | None = None,
+    ) -> tuple[str, str]:
+        """Сборка как ./deploy/deploy.sh ui: compose context ./app, тот же Dockerfile."""
+        ui_dir = ui_dir.resolve()
+        compose_file = ui_dir / "docker-compose.yml"
+        if not compose_file.is_file():
+            raise RuntimeError(f"missing {compose_file}")
+
+        cmd = [
+            "docker",
+            "compose",
+            "-f",
+            str(compose_file),
+            "build",
+            "--build-arg",
+            f"BUILD_DATE={build_date}",
+            "grapes-nta",
+        ]
+        proc = subprocess.run(
+            cmd,
+            cwd=str(ui_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if log_callback:
+            if proc.stdout:
+                for line in proc.stdout.splitlines():
+                    log_callback(line)
+            if proc.stderr:
+                for line in proc.stderr.splitlines():
+                    log_callback(line)
+        if proc.returncode != 0:
+            msg = proc.stderr.strip() or proc.stdout.strip() or "docker compose build failed"
+            raise RuntimeError(msg)
+
+        base_tag = "grapes-nta:latest"
+        tag_proc = subprocess.run(
+            ["docker", "tag", base_tag, tag],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if tag_proc.returncode != 0:
+            msg = tag_proc.stderr.strip() or f"docker tag {base_tag} {tag} failed"
+            raise RuntimeError(msg)
+
+        img = self.client.images.get(tag)
+        return tag, img.id or ""
+
     @property
     def client(self):
         if self._client is None:
@@ -125,8 +216,7 @@ class DockerService:
     ) -> str:
         if remove_old:
             self.stop_remove(name)
-        data_mount_host.mkdir(parents=True, exist_ok=True)
-        mount_src = str(data_mount_host.resolve())
+        mount_src = str(prepare_ui_data_mount(data_mount_host))
         container = self.client.containers.run(
             image=image,
             name=name,

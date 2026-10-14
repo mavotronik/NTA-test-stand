@@ -12,7 +12,8 @@ class ConfigTests(unittest.TestCase):
         data = yaml.safe_load(
             (Path(__file__).resolve().parents[1] / "config.example.yaml").read_text(encoding="utf-8")
         )
-        policy = load_policy_from_mapping(data)
+        example_dir = Path(__file__).resolve().parents[1]
+        policy = load_policy_from_mapping(data, config_dir=example_dir)
         self.assertTrue(branch_allowed(policy, "main"))
         self.assertTrue(branch_allowed(policy, "feature/foo"))
         self.assertFalse(branch_allowed(policy, "secret/experimental"))
@@ -21,9 +22,27 @@ class ConfigTests(unittest.TestCase):
         data = yaml.safe_load(
             (Path(__file__).resolve().parents[1] / "config.example.yaml").read_text(encoding="utf-8")
         )
-        policy = load_policy_from_mapping(data)
+        example_dir = Path(__file__).resolve().parents[1]
+        policy = load_policy_from_mapping(data, config_dir=example_dir)
         self.assertTrue(host_allowed(policy, "127.0.0.1"))
         self.assertFalse(host_allowed(policy, "8.8.8.8"))
+
+    def test_reject_duplicate_manager_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "config.yaml"
+            cfg.write_text(
+                """
+manager:
+  bootstrap_admin_password: x
+manager:
+  data_dir: ./data
+""",
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                from app.config import load_config_mapping
+
+                load_config_mapping(cfg)
 
     def test_load_custom_config(self):
         with tempfile.TemporaryDirectory() as tmp:

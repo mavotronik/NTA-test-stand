@@ -89,7 +89,7 @@ class JobWorker:
                 with self._lock:
                     self._deploying -= 1
 
-    def _prepare_ui_build_context(self, repo: Path, commit: str) -> tuple[Path, Path, Path, str]:
+    def _prepare_ui_build_context(self, repo: Path, commit: str) -> tuple[Path, Path, Path, str, Path]:
         pol = self.settings.policy
         wt = git_service.ensure_worktree(
             repo,
@@ -100,12 +100,13 @@ class JobWorker:
         )
         ctx = (wt / pol.ui_context).resolve()
         df = (wt / pol.ui_dockerfile).resolve()
+        ui_compose_dir = (wt / "deploy" / "ui").resolve()
         if not ctx.is_dir():
             raise RuntimeError(f"build context missing: {ctx} (worktree {wt})")
         if not df.is_file():
             raise RuntimeError(f"Dockerfile missing: {df}")
         bkey = git_service.build_key_for_commit(commit, df, ctx)
-        return wt, ctx, df, bkey
+        return wt, ctx, df, bkey, ui_compose_dir
 
     def _run_build(self, job: dict) -> None:
         job_id = job["id"]
@@ -115,7 +116,7 @@ class JobWorker:
             branch = job.get("git_branch") or "main"
             commit = git_service.resolve_commit(repo, branch, self.settings.policy)
             append_job_log(self.db, job_id, f"commit {commit}")
-            _wt, ctx, _df, bkey = self._prepare_ui_build_context(repo, commit)
+            _wt, ctx, _df, bkey, ui_compose_dir = self._prepare_ui_build_context(repo, commit)
             append_job_log(self.db, job_id, f"context {ctx}")
             with self.db.connection() as conn:
                 existing = conn.execute(
@@ -142,13 +143,24 @@ class JobWorker:
                 if line:
                     append_job_log(self.db, job_id, line)
 
-            _, image_id = self.docker.build_image(
-                context=ctx,
-                dockerfile="Dockerfile",
-                tag=tag,
-                buildargs={"BUILD_DATE": utc_now()},
-                log_callback=log_cb,
-            )
+            build_date = utc_now()
+            if self.docker.can_compose_ui_build(ui_compose_dir):
+                append_job_log(self.db, job_id, f"docker compose build in {ui_compose_dir}")
+                _, image_id = self.docker.build_ui_image_compose(
+                    ui_compose_dir,
+                    tag,
+                    build_date=build_date,
+                    log_callback=log_cb,
+                )
+            else:
+                append_job_log(self.db, job_id, "docker compose unavailable; tar context build")
+                _, image_id = self.docker.build_image(
+                    context=ctx,
+                    dockerfile="Dockerfile",
+                    tag=tag,
+                    buildargs={"BUILD_DATE": build_date},
+                    log_callback=log_cb,
+                )
             with self.db.connection() as conn:
                 conn.execute(
                     """
@@ -181,7 +193,7 @@ class JobWorker:
                 raise RuntimeError("db profile disabled")
             repo = Path(self.settings.policy.git_remote_url)
             commit = git_service.resolve_commit(repo, inst["git_branch"], self.settings.policy)
-            _wt, _ctx, _df, bkey = self._prepare_ui_build_context(repo, commit)
+            _wt, _ctx, _df, bkey, _ui_dir = self._prepare_ui_build_context(repo, commit)
             with self.db.connection() as conn:
                 build = conn.execute(
                     "SELECT * FROM builds WHERE build_key=? AND status='ready' ORDER BY created_at DESC LIMIT 1",
@@ -191,6 +203,7 @@ class JobWorker:
                 raise RuntimeError("no ready build; queue build first")
             fernet = get_fernet(self.settings.fernet_key, self.settings.secret_key)
             password = decrypt_secret(fernet, prof["password_enc"])
+            version_date = utc_now()[:10]
             env = {
                 "CLICKHOUSE_URL": f"{'https' if prof['tls'] else 'http'}://{prof['host']}:{prof['port']}",
                 "CLICKHOUSE_USER": prof["username"],
@@ -198,10 +211,12 @@ class JobWorker:
                 "CLICKHOUSE_DATABASE": prof["database_name"],
                 "SESSION_COOKIE_SECURE": "false",
                 "GRAPES_VERSION": commit[:12],
+                "GRAPES_VERSION_DATE": version_date,
                 "GIT_COMMIT": commit,
             }
             name = f"grapes-test-{inst['slug']}"
-            data_dir = self.settings.instances_dir / inst["slug"] / "data"
+            data_dir = self.settings.instance_ui_data_dir(inst["slug"])
+            append_job_log(self.db, job_id, f"ui data mount (host) {data_dir}")
             prev_tag = inst["image_tag"]
             prev_cfg = inst.get("rollback_config_json") or "{}"
             with self.db.connection() as conn:
