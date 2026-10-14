@@ -20,7 +20,12 @@
         <td><a href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener">:{{ i.port }}</a></td>
         <td>{{ i.db_profile_name }}</td>
         <td>{{ i.git_branch }}</td>
-        <td><a class="button" href="/instances/{{ i.id }}">Детали</a></td>
+        <td>
+          <a class="button" href="/instances/{{ i.id }}">Детали</a>
+          {% if user.role in ('admin', 'operator') %}
+          <a class="button" href="/instances/{{ i.id }}/edit">Изменить</a>
+          {% endif %}
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="7">Пока нет инстансов</td></tr>

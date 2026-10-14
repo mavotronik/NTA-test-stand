@@ -86,6 +86,56 @@ def create_instance(
     return iid
 
 
+def update_instance(
+    db: Database,
+    instance_id: str,
+    *,
+    name: str,
+    port: int,
+    db_profile_id: str,
+    git_branch: str,
+    git_commit: str,
+    image_tag: str,
+    user_id: str,
+) -> None:
+    now = utc_now()
+    with db.connection() as conn:
+        conn.execute(
+            """
+            UPDATE instances SET
+              name=?, port=?, db_profile_id=?, git_branch=?, git_commit=?, image_tag=?,
+              updated_by=?, updated_at=?, config_version=config_version + 1
+            WHERE id=?
+            """,
+            (
+                name,
+                port,
+                db_profile_id,
+                git_branch,
+                git_commit.strip(),
+                image_tag.strip(),
+                user_id,
+                now,
+                instance_id,
+            ),
+        )
+
+
+def list_ready_build_images(db: Database, limit: int = 30) -> list[dict[str, Any]]:
+    with db.connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, git_commit, image_tag, status, created_at
+            FROM builds
+            WHERE status='ready' AND image_tag != ''
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def list_db_profiles(db: Database) -> list[dict[str, Any]]:
     with db.connection() as conn:
         rows = conn.execute("SELECT * FROM db_profiles ORDER BY name").fetchall()

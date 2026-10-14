@@ -46,10 +46,12 @@ from app.repositories import (
     list_db_profiles,
     list_instances,
     list_jobs,
+    list_ready_build_images,
     list_users,
     port_taken,
     queue_job,
     save_db_profile,
+    update_instance,
     update_profile_check,
     validate_slug,
 )
@@ -197,23 +199,46 @@ async def instances_page(request: Request, db: Database = Depends(get_db), setti
     )
 
 
+def _instance_form_ctx(
+    db: Database,
+    settings,
+    *,
+    instance: dict | None = None,
+    form: dict | None = None,
+) -> dict:
+    repo = Path(settings.policy.git_remote_url)
+    branches = git_service.list_branches(repo, settings.policy) or ["main"]
+    base_form = {}
+    if instance:
+        base_form = {
+            "name": instance["name"],
+            "port": instance["port"],
+            "db_profile_id": instance["db_profile_id"],
+            "git_branch": instance["git_branch"],
+            "git_commit": instance.get("git_commit") or "",
+            "image_tag": instance.get("image_tag") or "",
+        }
+    if form:
+        base_form.update(form)
+    return {
+        "profiles": list_db_profiles(db),
+        "branches": branches,
+        "port_min": settings.policy.port_min,
+        "port_max": settings.policy.port_max,
+        "ready_images": list_ready_build_images(db),
+        "form": base_form,
+        "instance": instance,
+    }
+
+
 @app.get("/instances/new", response_class=HTMLResponse)
 async def instance_new_page(request: Request, db: Database = Depends(get_db), settings=Depends(get_settings), user=Depends(current_user)):
     require_role(user, "operator")
-    repo = Path(settings.policy.git_remote_url)
-    branches = git_service.list_branches(repo, settings.policy)
+    ctx = _instance_form_ctx(db, settings)
     return _render(
         request,
         "instance_form.html",
-        {
-            "user": user,
-            "active": "instances",
-            "profiles": list_db_profiles(db),
-            "branches": branches or ["main"],
-            "port_min": settings.policy.port_min,
-            "port_max": settings.policy.port_max,
-            "form": {},
-        },
+        {"user": user, "active": "instances", **ctx},
     )
 
 
@@ -264,6 +289,108 @@ async def instance_new_post(
         ip=_client_ip(request),
     )
     return RedirectResponse(f"/instances/{iid}", status_code=302)
+
+
+@app.get("/instances/{instance_id}/edit", response_class=HTMLResponse)
+async def instance_edit_page(
+    request: Request,
+    instance_id: str,
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    ctx = _instance_form_ctx(db, settings, instance=inst)
+    return _render(
+        request,
+        "instance_form.html",
+        {"user": user, "active": "instances", **ctx},
+    )
+
+
+@app.post("/instances/{instance_id}/edit")
+async def instance_edit_post(
+    request: Request,
+    instance_id: str,
+    name: str = Form(...),
+    port: int = Form(...),
+    db_profile_id: str = Form(...),
+    git_branch: str = Form(...),
+    git_commit: str = Form(""),
+    image_tag: str = Form(""),
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    if port < settings.policy.port_min or port > settings.policy.port_max:
+        raise HTTPException(400, "port out of range")
+    if port_taken(db, port, exclude_id=instance_id):
+        raise HTTPException(409, "port taken")
+    if not branch_allowed(settings.policy, git_branch):
+        raise HTTPException(400, "branch not allowed")
+    prof = get_db_profile(db, db_profile_id)
+    if not prof or prof.get("disabled"):
+        raise HTTPException(400, "invalid profile")
+    repo = Path(settings.policy.git_remote_url)
+    commit_pin = git_commit.strip()
+    if commit_pin:
+        try:
+            git_service.resolve_instance_commit(
+                repo,
+                {"git_commit": commit_pin, "git_branch": git_branch.strip()},
+                settings.policy,
+            )
+        except git_service.GitError as err:
+            ctx = _instance_form_ctx(
+                db,
+                settings,
+                instance=inst,
+                form={
+                    "name": name.strip(),
+                    "port": port,
+                    "db_profile_id": db_profile_id,
+                    "git_branch": git_branch.strip(),
+                    "git_commit": git_commit,
+                    "image_tag": image_tag,
+                },
+            )
+            return _render(
+                request,
+                "instance_form.html",
+                {"user": user, "active": "instances", "error": str(err), **ctx},
+                status=400,
+            )
+    update_instance(
+        db,
+        instance_id,
+        name=name.strip(),
+        port=port,
+        db_profile_id=db_profile_id,
+        git_branch=git_branch.strip(),
+        git_commit=commit_pin,
+        image_tag=image_tag.strip(),
+        user_id=user["id"],
+    )
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="instance_update",
+        target_type="instance",
+        target_id=instance_id,
+        ip=_client_ip(request),
+    )
+    return RedirectResponse(f"/instances/{instance_id}?message=instance+updated", status_code=302)
 
 
 @app.get("/instances/{instance_id}", response_class=HTMLResponse)

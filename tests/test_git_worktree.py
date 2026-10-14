@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.config import Policy
 from app.services import git_service
 
 
@@ -37,6 +38,46 @@ class GitWorktreeCleanupTests(unittest.TestCase):
                 ui_dockerfile="deploy/ui/app/Dockerfile",
             )
             self.assertTrue((path / "deploy/ui/app/Dockerfile").is_file())
+
+
+    def test_resolve_instance_commit_pin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            repo.mkdir()
+            import subprocess
+
+            subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@e.com"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+            (repo / "f.txt").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "c"], check=True)
+            full = subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+            ).strip()
+            pol = Policy(
+                git_remote_url=str(repo),
+                allowed_branch_patterns=["*"],
+                port_min=3100,
+                port_max=3199,
+                storage_root=str(root / "data"),
+                public_host="127.0.0.1",
+                clickhouse_cidrs=[],
+                ch_connect_timeout_sec=5,
+                build_max_parallel=1,
+                ui_dockerfile="Dockerfile",
+                ui_context=".",
+                deploy_max_parallel=1,
+                health_timeout_sec=60,
+                health_interval_sec=3,
+                host_metrics_refresh_sec=5,
+                host_disk_paths=["/"],
+            )
+            got = git_service.resolve_instance_commit(
+                repo, {"git_commit": full[:12], "git_branch": "main"}, pol
+            )
+            self.assertEqual(got, full)
 
 
 if __name__ == "__main__":

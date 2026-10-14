@@ -7,6 +7,9 @@
     <div class="page-subtitle">{{ instance.slug }} · {{ instance.state }}</div>
   </div>
   <div class="page-actions">
+    {% if user.role in ('admin', 'operator') %}
+    <a class="button" href="/instances/{{ instance.id }}/edit">Изменить</a>
+    {% endif %}
     <a class="button" href="http://{{ public_host }}:{{ instance.port }}/" target="_blank" rel="noopener">Открыть UI</a>
   </div>
 </div>

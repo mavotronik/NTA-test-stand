@@ -114,8 +114,14 @@ class JobWorker:
         self._set_job(job_id, "running", "resolve_commit")
         try:
             repo = Path(self.settings.policy.git_remote_url)
-            branch = job.get("git_branch") or "main"
-            commit = git_service.resolve_commit(repo, branch, self.settings.policy)
+            with self.db.connection() as conn:
+                inst_row = conn.execute(
+                    "SELECT * FROM instances WHERE id=?", (job["instance_id"],)
+                ).fetchone()
+            if not inst_row:
+                raise RuntimeError("instance missing")
+            inst = dict(inst_row)
+            commit = git_service.resolve_instance_commit(repo, inst, self.settings.policy)
             append_job_log(self.db, job_id, f"commit {commit}")
             _wt, ctx, _df, bkey, ui_compose_dir = self._prepare_ui_build_context(repo, commit)
             append_job_log(self.db, job_id, f"context {ctx}")
@@ -198,15 +204,22 @@ class JobWorker:
             if prof["disabled"]:
                 raise RuntimeError("db profile disabled")
             repo = Path(self.settings.policy.git_remote_url)
-            commit = git_service.resolve_commit(repo, inst["git_branch"], self.settings.policy)
-            _wt, _ctx, _df, bkey, _ui_dir = self._prepare_ui_build_context(repo, commit)
-            with self.db.connection() as conn:
-                build = conn.execute(
-                    "SELECT * FROM builds WHERE build_key=? AND status='ready' ORDER BY created_at DESC LIMIT 1",
-                    (bkey,),
-                ).fetchone()
-            if not build:
-                raise RuntimeError("no ready build; queue build first")
+            commit = git_service.resolve_instance_commit(repo, inst, self.settings.policy)
+            pinned_image = (inst.get("image_tag") or "").strip()
+            build = None
+            if pinned_image:
+                append_job_log(self.db, job_id, f"using pinned image {pinned_image}")
+                image_for_run = pinned_image
+            else:
+                _wt, _ctx, _df, bkey, _ui_dir = self._prepare_ui_build_context(repo, commit)
+                with self.db.connection() as conn:
+                    build = conn.execute(
+                        "SELECT * FROM builds WHERE build_key=? AND status='ready' ORDER BY created_at DESC LIMIT 1",
+                        (bkey,),
+                    ).fetchone()
+                if not build:
+                    raise RuntimeError("no ready build; queue build first or set image on instance")
+                image_for_run = build["image_tag"]
             fernet = get_fernet(self.settings.fernet_key, self.settings.secret_key)
             password = decrypt_secret(fernet, prof["password_enc"])
             version_date = utc_now()[:10]
@@ -236,7 +249,7 @@ class JobWorker:
             append_job_log(self.db, job_id, f"starting {name} on port {inst['port']}")
             cid = self.docker.run_instance_container(
                 name=name,
-                image=build["image_tag"],
+                image=image_for_run,
                 port=int(inst["port"]),
                 env=env,
                 data_mount_host=data_dir,
@@ -256,7 +269,7 @@ class JobWorker:
                       rollback_config_json=?, updated_at=?
                     WHERE id=?
                     """,
-                    (commit, build["image_tag"], cid, json.dumps({"port": inst["port"]}), utc_now(), instance_id),
+                    (commit, image_for_run, cid, json.dumps({"port": inst["port"]}), utc_now(), instance_id),
                 )
             self._set_job(job_id, "done", "running")
         except Exception as err:

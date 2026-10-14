@@ -54,6 +54,21 @@ def list_branches(repo: Path, policy: Policy) -> list[str]:
     return sorted(set(branches))
 
 
+def resolve_instance_commit(repo: Path, inst: dict, policy: Policy) -> str:
+    """Commit для сборки/деплоя: явный pin в git_commit или HEAD ветки."""
+    pin = (inst.get("git_commit") or "").strip()
+    if pin:
+        try:
+            sha = _run(["git", "-C", str(repo), "rev-parse", pin])
+        except GitError as err:
+            raise GitError(f"pinned commit not found: {pin}") from err
+        if len(sha) != 40:
+            raise GitError(f"invalid pinned commit: {pin}")
+        return sha
+    branch = (inst.get("git_branch") or "main").strip()
+    return resolve_commit(repo, branch, policy)
+
+
 def resolve_commit(repo: Path, branch: str, policy: Policy) -> str:
     if not branch_allowed(policy, branch):
         raise GitError(f"branch not allowed: {branch}")
