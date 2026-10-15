@@ -23,8 +23,12 @@
   }
   const LOG_AUTOSCROLL_KEY = 'job-log-autoscroll';
 
+  function jobLogShell(el) {
+    return el?.closest('.job-log-shell');
+  }
+
   function jobLogAutoscrollEnabled(pre) {
-    const cb = pre?.closest('.card')?.querySelector('.job-log-autoscroll');
+    const cb = jobLogShell(pre)?.querySelector('.job-log-autoscroll');
     return !cb || cb.checked;
   }
 
@@ -33,11 +37,13 @@
   }
 
   function initJobLogAutoscrollToggle(cb) {
+    if (cb.dataset.autoscrollBound) return;
+    cb.dataset.autoscrollBound = '1';
     const saved = localStorage.getItem(LOG_AUTOSCROLL_KEY);
     if (saved !== null) cb.checked = saved === 'true';
     cb.addEventListener('change', () => {
       localStorage.setItem(LOG_AUTOSCROLL_KEY, String(cb.checked));
-      const pre = cb.closest('.card')?.querySelector('.job-log-pre');
+      const pre = jobLogShell(cb)?.querySelector('.job-log-pre');
       if (cb.checked && pre) scrollJobLogToBottom(pre);
     });
   }
@@ -136,6 +142,270 @@
     }
   });
 
+  function openOverlay(overlay) {
+    if (!overlay) return;
+    overlay.classList.add('visible');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+  }
+
+  function closeOverlay(overlay) {
+    if (!overlay) return;
+    overlay.classList.remove('visible');
+    overlay.setAttribute('aria-hidden', 'true');
+    if (overlay.id && location.hash === '#' + overlay.id) {
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    if (!document.querySelector('.modal-overlay.visible')) {
+      document.body.classList.remove('modal-open');
+    }
+    if (overlay.classList.contains('page-modal') && overlay.dataset.closeHref) {
+      window.location.href = overlay.dataset.closeHref;
+    }
+  }
+
+  if (document.querySelector('.modal-overlay.visible, .modal-overlay:target')) {
+    document.body.classList.add('modal-open');
+  }
+
+  document.addEventListener('click', (e) => {
+    const opener = e.target.closest('[data-open-modal]');
+    if (opener) {
+      const overlay = document.getElementById(opener.getAttribute('data-open-modal'));
+      if (overlay) {
+        e.preventDefault();
+        openOverlay(overlay);
+        return;
+      }
+    }
+    const closer = e.target.closest('[data-close-modal]');
+    if (closer) {
+      const overlay = closer.closest('.modal-overlay');
+      if (overlay) {
+        e.preventDefault();
+        if (overlay.id === 'confirmModal') closeConfirm();
+        else closeOverlay(overlay);
+      }
+      return;
+    }
+    if (e.target.classList.contains('modal-overlay') && e.target.classList.contains('visible')) {
+      if (e.target.id === 'confirmModal') closeConfirm();
+      else closeOverlay(e.target);
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (confirmOverlay?.classList.contains('visible')) {
+      e.preventDefault();
+      closeConfirm();
+      return;
+    }
+    const open = [...document.querySelectorAll('.modal-overlay.visible')].at(-1);
+    if (open) {
+      e.preventDefault();
+      closeOverlay(open);
+    }
+  });
+
+  function initInstancePortInput(input) {
+    const hint = input?.form?.querySelector('#instance-port-error') || document.getElementById('instance-port-error');
+    if (!input || !hint || input.dataset.portBound) return;
+    input.dataset.portBound = '1';
+    let occupied = [];
+    try {
+      occupied = JSON.parse(input.dataset.occupied || '[]');
+    } catch (err) {
+      occupied = [];
+    }
+    const byPort = new Map(occupied.map((row) => [Number(row.port), row]));
+    function conflictMessage() {
+      const raw = input.value.trim();
+      if (!raw) return '';
+      const value = Number(raw);
+      if (!Number.isInteger(value)) return '';
+      const hit = byPort.get(value);
+      if (!hit) return '';
+      return 'Порт ' + value + ' уже занят инстансом «' + hit.name + '»';
+    }
+    function showConflict() {
+      const message = conflictMessage();
+      input.classList.toggle('input-invalid', Boolean(message));
+      if (message) input.setAttribute('aria-invalid', 'true');
+      else input.removeAttribute('aria-invalid');
+      hint.hidden = !message;
+      hint.textContent = message;
+      return !message;
+    }
+    input.addEventListener('input', showConflict);
+    if (input.form) {
+      input.form.addEventListener('submit', (event) => {
+        if (!showConflict()) event.preventDefault();
+      });
+    }
+    showConflict();
+  }
+  initInstancePortInput(document.getElementById('instance-port'));
+
+  const confirmOverlay = document.getElementById('confirmModal');
+  const confirmDialog = confirmOverlay?.querySelector('.modal');
+  const confirmTitle = document.getElementById('confirmModalTitle');
+  const confirmBody = document.getElementById('confirmModalBody');
+  const confirmIcon = document.getElementById('confirmModalIcon');
+  const confirmOk = document.getElementById('confirmModalOk');
+  const confirmCancel = document.getElementById('confirmModalCancel');
+  const confirmClose = document.getElementById('confirmModalClose');
+  let confirmOnOk = null;
+  let confirmLastFocus = null;
+
+  function getFocusable(root) {
+    return [...root.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(
+      (el) => !el.disabled && el.getAttribute('aria-hidden') !== 'true',
+    );
+  }
+
+  function setConfirmButtonLabel(btn, label, icon) {
+    if (!btn) return;
+    btn.replaceChildren();
+    if (icon) {
+      const span = document.createElement('span');
+      span.className = 'mdi ' + icon;
+      btn.appendChild(span);
+    }
+    btn.appendChild(document.createTextNode(icon ? ' ' + label : label));
+  }
+
+  function setModalTone(tone) {
+    const t = tone || 'danger';
+    if (confirmDialog) confirmDialog.dataset.tone = t;
+    if (!confirmOk) return;
+    confirmOk.className = 'button ' + (t === 'success' ? 'success' : t === 'primary' ? 'primary' : 'danger');
+  }
+
+  function fillConfirmBody(message, items) {
+    if (!confirmBody) return;
+    confirmBody.replaceChildren();
+    if (message) {
+      const p = document.createElement('p');
+      p.className = 'modal-text';
+      p.textContent = message;
+      confirmBody.appendChild(p);
+    }
+    if (!items?.length) return;
+    const ul = document.createElement('ul');
+    ul.className = 'modal-item-list';
+    const max = 8;
+    items.slice(0, max).forEach((name) => {
+      const li = document.createElement('li');
+      li.textContent = name;
+      ul.appendChild(li);
+    });
+    if (items.length > max) {
+      const li = document.createElement('li');
+      li.className = 'modal-item-more';
+      li.textContent = 'и ещё ' + (items.length - max);
+      ul.appendChild(li);
+    }
+    confirmBody.appendChild(ul);
+  }
+
+  function closeConfirm() {
+    if (!confirmOverlay?.classList.contains('visible')) return;
+    confirmOnOk = null;
+    document.removeEventListener('keydown', onConfirmKeydown);
+    closeOverlay(confirmOverlay);
+    confirmLastFocus?.focus?.();
+  }
+
+  function onConfirmKeydown(e) {
+    if (e.key !== 'Tab' || !confirmDialog) return;
+    const nodes = getFocusable(confirmDialog);
+    if (!nodes.length) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  function openConfirm(opts) {
+    const title = opts.title || 'Подтверждение';
+    const message = opts.message || '';
+    const onConfirm = opts.onConfirm;
+    if (!confirmOverlay || !confirmDialog) {
+      if (window.confirm(message || title)) onConfirm?.();
+      return;
+    }
+    confirmLastFocus = document.activeElement;
+    confirmTitle.textContent = title;
+    setConfirmButtonLabel(confirmCancel, opts.cancel || 'Отмена');
+    setConfirmButtonLabel(confirmOk, opts.ok || 'Подтвердить', opts.okIcon || opts.icon);
+    setModalTone(opts.tone);
+    if (confirmIcon) confirmIcon.className = 'mdi ' + (opts.icon || 'mdi-alert-outline');
+    fillConfirmBody(message, opts.items);
+    confirmOnOk = onConfirm;
+    openOverlay(confirmOverlay);
+    document.addEventListener('keydown', onConfirmKeydown);
+    const focusBtn = opts.tone === 'danger' || opts.tone === 'warning' ? confirmCancel : confirmOk;
+    (focusBtn || confirmCancel)?.focus();
+  }
+
+  confirmOk?.addEventListener('click', () => {
+    const fn = confirmOnOk;
+    closeConfirm();
+    fn?.();
+  });
+
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-confirm')) return;
+    if (form.dataset.confirmAccepted === '1') {
+      delete form.dataset.confirmAccepted;
+      return;
+    }
+    e.preventDefault();
+    openConfirm({
+      title: form.dataset.confirmTitle || 'Подтверждение',
+      message: form.dataset.confirmMessage || '',
+      ok: form.dataset.confirmOk || 'Подтвердить',
+      tone: form.dataset.confirmTone || 'danger',
+      icon: form.dataset.confirmIcon || 'mdi-alert-outline',
+      onConfirm: () => {
+        form.dataset.confirmAccepted = '1';
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.submit();
+      },
+    });
+  });
+
+  const BULK_COPY = {
+    start: {
+      title: 'Запустить инстансы?',
+      message: (n) => `Поставить в очередь запуск выбранных инстансов (${n})? Контейнеры стартуют с текущим образом.`,
+      ok: 'Запустить',
+      tone: 'success',
+      icon: 'mdi-play',
+    },
+    stop: {
+      title: 'Остановить инстансы?',
+      message: (n) => `Поставить в очередь остановку выбранных инстансов (${n})? Контейнеры будут остановлены.`,
+      ok: 'Остановить',
+      tone: 'danger',
+      icon: 'mdi-stop',
+    },
+    rebuild: {
+      title: 'Пересобрать инстансы?',
+      message: (n) => `Поставить в очередь пересборку выбранных инстансов (${n})? Для каждого будет сборка образа и запуск.`,
+      ok: 'Пересобрать',
+      tone: 'primary',
+      icon: 'mdi-sync',
+    },
+  };
+
   const bulkForm = document.getElementById('instances-bulk-form');
   if (bulkForm) {
     const actionInput = document.getElementById('instances-bulk-action');
@@ -167,20 +437,50 @@
     bulkButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         const action = btn.dataset.instancesBulk;
-        if (!action || !actionInput) return;
-        if (action === 'rebuild') {
-          const n = [...rowChecks()].filter((c) => c.checked).length;
-          if (!window.confirm(`Поставить в очередь пересборку (сборка и запуск) для ${n} инстанс(ов)?`)) return;
-        }
-        actionInput.value = action;
-        bulkForm.requestSubmit();
+        const copy = BULK_COPY[action];
+        if (!action || !actionInput || !copy) return;
+        const selected = [...rowChecks()].filter((c) => c.checked);
+        if (!selected.length) return;
+        const names = selected.map((c) => c.dataset.instanceName || c.value);
+        openConfirm({
+          title: copy.title,
+          message: copy.message(selected.length),
+          items: names,
+          ok: copy.ok,
+          tone: copy.tone,
+          icon: copy.icon,
+          onConfirm: () => {
+            actionInput.value = action;
+            bulkForm.requestSubmit();
+          },
+        });
       });
     });
     syncBulkUi();
   }
 
+  document.body.addEventListener('htmx:beforeRequest', (evt) => {
+    const target = evt.detail.target;
+    if (target?.id === 'formModalInner') openOverlay(document.getElementById('formModal'));
+    if (target?.id === 'logModalInner') openOverlay(document.getElementById('logModal'));
+  });
+
   document.body.addEventListener('htmx:afterSwap', (evt) => {
     const target = evt.detail.target;
+    if (target?.id === 'formModalInner') {
+      openOverlay(document.getElementById('formModal'));
+      initInstancePortInput(target.querySelector('#instance-port'));
+      target.querySelector('input:not([disabled]), select, textarea')?.focus();
+      return;
+    }
+    if (target?.id === 'logModalInner') {
+      openOverlay(document.getElementById('logModal'));
+      target.querySelectorAll('.job-log-autoscroll').forEach(initJobLogAutoscrollToggle);
+      target.querySelectorAll('.job-log-pre').forEach((pre) => {
+        if (jobLogAutoscrollEnabled(pre)) scrollJobLogToBottom(pre);
+      });
+      return;
+    }
     if (target?.id !== 'instance-job-status') return;
     target.querySelectorAll('.job-log-autoscroll').forEach(initJobLogAutoscrollToggle);
     target.querySelectorAll('.instance-auto-open-ui').forEach(initInstanceAutoOpenUi);

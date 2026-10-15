@@ -1,0 +1,7 @@
+<a class="button"
+   href="/deployments/{{ job_id }}"
+   hx-get="/deployments/{{ job_id }}"
+   hx-target="#logModalInner"
+   hx-select=".js-log-modal-dialog"
+   hx-swap="innerHTML"
+   hx-push-url="false"><span class="mdi mdi-text-box-outline"></span> Логи</a>

@@ -1,0 +1,7 @@
+<a class="{{ extra_class|default('button') }}"
+   href="{{ url }}"
+   hx-get="{{ url }}"
+   hx-target="#formModalInner"
+   hx-select=".js-form-modal-dialog"
+   hx-swap="innerHTML"
+   hx-push-url="false">{% if icon %}<span class="mdi {{ icon }}"></span> {% endif %}{{ label }}</a>

@@ -422,6 +422,7 @@ async def instance_new_post(
     git_branch: str = Form(...),
     git_commit: str = Form(""),
     image_tag: str = Form(""),
+    return_to: str = Form(""),
     csrf_token: str = Form(""),
     db: Database = Depends(get_db),
     settings=Depends(get_settings),
@@ -456,6 +457,7 @@ async def instance_new_post(
                 **ctx,
                 "user": user,
                 "active": "instances",
+                "return_to": return_to,
                 "port_error": _port_conflict_message(owner, port),
             },
             status=409,
@@ -517,6 +519,7 @@ async def instance_edit_post(
     git_branch: str = Form(...),
     git_commit: str = Form(""),
     image_tag: str = Form(""),
+    return_to: str = Form(""),
     csrf_token: str = Form(""),
     db: Database = Depends(get_db),
     settings=Depends(get_settings),
@@ -551,6 +554,7 @@ async def instance_edit_post(
                 **ctx,
                 "user": user,
                 "active": "instances",
+                "return_to": return_to,
                 "port_error": _port_conflict_message(owner, port),
             },
             status=409,
@@ -586,7 +590,7 @@ async def instance_edit_post(
             return _render(
                 request,
                 "instance_form.html",
-                {"user": user, "active": "instances", "error": str(err), **ctx},
+                {"user": user, "active": "instances", "return_to": return_to, "error": str(err), **ctx},
                 status=400,
             )
     update_instance(
@@ -610,6 +614,8 @@ async def instance_edit_post(
         target_id=instance_id,
         ip=_client_ip(request),
     )
+    if return_to == "instances":
+        return RedirectResponse("/instances?message=instance+updated", status_code=302)
     return RedirectResponse(f"/instances/{instance_id}?message=instance+updated", status_code=302)
 
 
@@ -1243,7 +1249,13 @@ async def deployment_detail(request: Request, job_id: str, db: Database = Depend
     return _render(
         request,
         "job_detail.html",
-        {"user": user, "active": "deployments", "job": dict(job), "log_rows": log_rows},
+        {
+            "user": user,
+            "active": "deployments",
+            "job": dict(job),
+            "log_rows": log_rows,
+            "job_type_labels": JOB_TYPE_LABELS,
+        },
     )
 
 

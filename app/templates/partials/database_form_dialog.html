@@ -1,0 +1,17 @@
+<div class="modal modal-lg js-form-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="databaseFormTitle" data-tone="primary">
+  <div class="modal-header">
+    <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-{% if profile %}pencil{% else %}database-plus{% endif %}"></span></div>
+    <h2 class="modal-title" id="databaseFormTitle">{{ 'Редактирование профиля' if profile else 'Новый профиль БД' }}</h2>
+    <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+  </div>
+  <form method="post" action="{% if profile %}/databases/{{ profile.id }}/edit{% else %}/databases/new{% endif %}" id="database-form">
+    <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+    <div class="modal-body modal-body-form">
+      {% include "partials/database_form_fields.html" %}
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="button" data-close-modal>Отмена</button>
+      <button class="button primary" type="submit"><span class="mdi mdi-content-save"></span> Сохранить</button>
+    </div>
+  </form>
+</div>

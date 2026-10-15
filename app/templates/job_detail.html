@@ -1,18 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Задача {{ job.id[:8] }}{% endblock %}
 {% block content %}
-<div class="page-header"><div><h1 class="page-title">Задача {{ job.job_type }}</h1><div class="page-subtitle">{{ job.status }} · {{ job.stage }}</div></div></div>
-<div class="card">
-  <div class="card-header job-log-header">
-    <div class="card-title">Лог · {{ job.status }} · {{ job.stage }}</div>
-    {% include "partials/job_log_autoscroll_toggle.html" %}
-  </div>
-  <div class="card-body job-log-body">
-    <pre class="job-log-pre"
-         hx-get="/deployments/{{ job.id }}/logs"
-         hx-trigger="load, every 2s [document.visibilityState=='visible']"
-         hx-swap="beforeend"
-         hx-vals="js:jobLogPollVals(event.target)">{% include "partials/job_log_lines.html" %}</pre>
+<div class="modal-overlay visible page-modal job-log-shell" id="jobLogPageModal" data-close-href="/deployments" aria-hidden="false">
+  <div class="modal modal-log js-log-modal-dialog job-log-shell" role="dialog" aria-modal="true" aria-labelledby="jobLogTitle" data-tone="primary">
+    <div class="modal-header">
+      <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-text-box-outline"></span></div>
+      <div class="modal-header-grow">
+        <h2 class="modal-title" id="jobLogTitle">{% if job_type_labels is defined %}{{ job_type_labels.get(job.job_type, job.job_type) }}{% else %}{{ job.job_type }}{% endif %} · {{ job.status }} · {{ job.stage }}</h2>
+        {% include "partials/job_log_autoscroll_toggle.html" %}
+      </div>
+      <a class="icon-button modal-close" href="/deployments" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></a>
+    </div>
+    <div class="modal-body modal-body-log">
+      <pre class="job-log-pre"
+           hx-get="/deployments/{{ job.id }}/logs"
+           hx-trigger="load, every 2s [document.visibilityState=='visible']"
+           hx-swap="beforeend"
+           hx-vals="js:jobLogPollVals(event.target)">{% include "partials/job_log_lines.html" %}</pre>
+    </div>
   </div>
 </div>
 {% endblock %}

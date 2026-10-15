@@ -1,0 +1,19 @@
+{% set return_to = return_to if return_to is defined else request.query_params.get('return_to', '') %}
+<div class="modal modal-lg js-form-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="instanceFormTitle" data-tone="primary">
+  <div class="modal-header">
+    <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-{% if instance %}pencil{% else %}plus{% endif %}"></span></div>
+    <h2 class="modal-title" id="instanceFormTitle">{% if instance %}Изменение: {{ instance.name }}{% else %}Создание инстанса{% endif %}</h2>
+    <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+  </div>
+  <form method="post" action="{% if instance %}/instances/{{ instance.id }}/edit{% else %}/instances/new{% endif %}" id="instance-form">
+    <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+    <input type="hidden" name="return_to" value="{{ return_to }}">
+    <div class="modal-body modal-body-form">
+      {% include "partials/instance_form_fields.html" %}
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="button" data-close-modal>Отмена</button>
+      <button class="button primary" type="submit"><span class="mdi mdi-{% if instance %}content-save{% else %}plus{% endif %}"></span> {% if instance %}Сохранить{% else %}Создать{% endif %}</button>
+    </div>
+  </form>
+</div>

@@ -8,7 +8,7 @@
   </div>
   <div class="page-actions">
     {% if user.role in ('admin', 'operator') %}
-    <a class="button" href="/instances/{{ instance.id }}/edit"><span class="mdi mdi-pencil"></span> Изменить</a>
+    {% with url="/instances/" ~ instance.id ~ "/edit?return_to=detail", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
     {% endif %}
     <a class="button" href="http://{{ public_host }}:{{ instance.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
   </div>
@@ -49,7 +49,13 @@
       <button class="button danger" type="submit"{% if active_job %} disabled{% endif %}><span class="mdi mdi-stop"></span> Остановить</button>
     </form>
     {% if user.role in ('admin', 'operator') %}
-    <form method="post" action="/instances/{{ instance.id }}/delete" onsubmit="return confirm('Удалить инстанс {{ instance.name }}? Контейнер будет остановлен.');">
+    <form method="post" action="/instances/{{ instance.id }}/delete"
+          data-confirm
+          data-confirm-title="Удалить инстанс?"
+          data-confirm-message="Инстанс «{{ instance.name }}» будет удалён. Контейнер будет остановлен."
+          data-confirm-ok="Удалить"
+          data-confirm-tone="danger"
+          data-confirm-icon="mdi-delete">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
       <button class="button danger" type="submit"{% if active_job %} disabled{% endif %}><span class="mdi mdi-delete"></span> Удалить инстанс</button>
     </form>
@@ -78,7 +84,7 @@
       {% for j in jobs %}
       <tr>
         <td>{{ j.id[:10] }}…</td><td>{{ job_type_labels.get(j.job_type, j.job_type) }}</td><td>{{ j.status }}</td><td>{{ j.stage }}</td><td>{{ j.created_at }}</td>
-        <td><a class="button" href="/deployments/{{ j.id }}"><span class="mdi mdi-text-box-outline"></span> Логи</a></td>
+        <td>{% with job_id=j.id %}{% include "partials/log_modal_link.html" %}{% endwith %}</td>
       </tr>
       {% else %}
       <tr><td colspan="6">Нет задач</td></tr>

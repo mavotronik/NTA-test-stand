@@ -1,0 +1,53 @@
+{% if error %}<p class="modal-form-error">{{ error }}</p>{% endif %}
+<div class="form-group"><label class="form-label">Имя</label><input class="input" name="name" required value="{{ form.name or '' }}"></div>
+<div class="form-group"><label class="form-label">Slug (a-z0-9-)</label>
+  {% if instance %}
+  <input class="input" value="{{ instance.slug }}" disabled>
+  <p class="field-hint">Slug не меняется (имя контейнера grapes-test-{{ instance.slug }}).</p>
+  {% else %}
+  <input class="input" name="slug" required pattern="[a-z0-9][a-z0-9-]{1,62}" value="{{ form.slug or '' }}">
+  {% endif %}
+</div>
+<div class="form-group">
+  <label class="form-label" for="instance-port">Порт</label>
+  <input class="input{% if port_error %} input-invalid{% endif %}" id="instance-port" type="number" name="port" required min="{{ port_min }}" max="{{ port_max }}" {% if form.port is defined and form.port is not none %}value="{{ form.port }}"{% endif %} data-occupied="{{ occupied_ports_json }}" autocomplete="off" {% if port_error %}aria-invalid="true"{% endif %}>
+  {% if not instance %}
+    {% if suggested_port is not none %}
+    <p class="field-hint">Подставлен первый свободный порт в диапазоне {{ port_min }}–{{ port_max }}.</p>
+    {% else %}
+    <p class="field-error">В диапазоне {{ port_min }}–{{ port_max }} нет свободных портов.</p>
+    {% endif %}
+  {% else %}
+  <p class="field-hint">Диапазон {{ port_min }}–{{ port_max }}. Порт, занятый другим инстансом, будет подсвечен.</p>
+  {% endif %}
+  <p class="field-error" id="instance-port-error" {% if not port_error %}hidden{% endif %}>{{ port_error or '' }}</p>
+</div>
+<div class="form-group"><label class="form-label">Профиль БД</label>
+  <select class="select" name="db_profile_id" required>
+    {% for p in profiles %}
+    <option value="{{ p.id }}" {% if form.db_profile_id==p.id %}selected{% endif %}>{{ p.name }}{% if p.disabled %} (отключён){% endif %}</option>
+    {% endfor %}
+  </select>
+</div>
+<div class="form-group"><label class="form-label">Git-ветка</label>
+  <select class="select" name="git_branch" required>
+    {% for b in branches %}
+    <option {% if form.git_branch==b %}selected{% endif %}>{{ b }}</option>
+    {% endfor %}
+  </select>
+</div>
+<div class="form-group">
+  <label class="form-label">Commit для сборки</label>
+  <input class="input" name="git_commit" placeholder="полный SHA или короткий; пусто — HEAD ветки" value="{{ form.git_commit or '' }}" autocomplete="off">
+  <p class="field-hint">Сборка и деплой без образа используют этот commit. После успешного деплоя сюда попадает фактический commit.</p>
+</div>
+<div class="form-group">
+  <label class="form-label">Docker-образ (необязательно)</label>
+  <input class="input" name="image_tag" list="ready-images" placeholder="grapes-nta-test:abc123456789" value="{{ form.image_tag or '' }}" autocomplete="off">
+  <datalist id="ready-images">
+    {% for b in ready_images %}
+    <option value="{{ b.image_tag }}">{{ b.git_commit[:12] }} · {{ b.created_at }}</option>
+    {% endfor %}
+  </datalist>
+  <p class="field-hint">Если указан — «Развернуть» запускает этот образ без поиска сборки по commit. Пусто — нужна готовая сборка.</p>
+</div>

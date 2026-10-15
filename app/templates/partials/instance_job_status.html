@@ -1,17 +1,17 @@
-<div class="card-header job-log-header" data-job-status="{{ job.status }}" data-job-id="{{ job.id }}" data-job-type="{{ job.job_type }}">
-  <div class="card-title">{{ job_type_labels.get(job.job_type, job.job_type) }} · {{ job.status }} · {{ job.stage }}</div>
+<div class="modal-header-grow" data-job-status="{{ job.status }}" data-job-id="{{ job.id }}" data-job-type="{{ job.job_type }}">
+  <h2 class="modal-title">{{ job_type_labels.get(job.job_type, job.job_type) }} · {{ job.status }} · {{ job.stage }}</h2>
   {% include "partials/job_log_autoscroll_toggle.html" %}
+  {% if job.status == 'done' and job.job_type == 'build_run' %}
+  <div class="instance-job-success-actions modal-log-extra">
+    <a class="button primary instance-open-ui-link"
+       href="http://{{ public_host }}:{{ instance.port }}/"
+       target="_blank"
+       rel="noopener"
+       data-ui-url="http://{{ public_host }}:{{ instance.port }}/"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
+    <label class="job-log-autoscroll-row instance-auto-open-ui-row">
+      <span class="instance-auto-open-ui-text">Открыть автоматически</span>
+      <span class="switch"><input type="checkbox" class="instance-auto-open-ui" checked><span class="slider"></span></span>
+    </label>
+  </div>
+  {% endif %}
 </div>
-{% if job.status == 'done' and job.job_type == 'build_run' %}
-<div class="card-body instance-job-success-actions">
-  <a class="button primary instance-open-ui-link"
-     href="http://{{ public_host }}:{{ instance.port }}/"
-     target="_blank"
-     rel="noopener"
-     data-ui-url="http://{{ public_host }}:{{ instance.port }}/"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
-  <label class="job-log-autoscroll-row instance-auto-open-ui-row">
-    <span class="instance-auto-open-ui-text">Открыть автоматически</span>
-    <span class="switch"><input type="checkbox" class="instance-auto-open-ui" checked><span class="slider"></span></span>
-  </label>
-</div>
-{% endif %}

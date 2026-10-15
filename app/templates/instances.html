@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
   <div><h1 class="page-title">Инстансы</h1></div>
-  <div class="page-actions"><a class="button primary" href="/instances/new"><span class="mdi mdi-plus"></span> Создать</a></div>
+  <div class="page-actions">{% if user.role in ('admin', 'operator') %}{% with url="/instances/new", label="Создать", icon="mdi-plus", extra_class="button primary" %}{% include "partials/form_modal_link.html" %}{% endwith %}{% endif %}</div>
 </div>
 {% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
 {% if error %}<p style="color:var(--danger);">{{ error }}</p>{% endif %}
@@ -27,7 +27,7 @@
       {% for i in instances %}
       <tr>
         {% if user.role in ('admin', 'operator') %}
-        <td class="instances-col-check"><input type="checkbox" form="instances-bulk-form" class="instances-row-check" name="instance_ids" value="{{ i.id }}" aria-label="Выбрать {{ i.name }}"></td>
+        <td class="instances-col-check"><input type="checkbox" form="instances-bulk-form" class="instances-row-check" name="instance_ids" value="{{ i.id }}" data-instance-name="{{ i.name }}" aria-label="Выбрать {{ i.name }}"></td>
         {% endif %}
         <td>{{ i.name }}</td>
         <td>{{ i.slug }}</td>
@@ -39,7 +39,7 @@
           <a class="button" href="/instances/{{ i.id }}"><span class="mdi mdi-eye-outline"></span> Детали</a>
           <a class="button" href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
           {% if user.role in ('admin', 'operator') %}
-          <a class="button" href="/instances/{{ i.id }}/edit"><span class="mdi mdi-pencil"></span> Изменить</a>
+          {% with url="/instances/" ~ i.id ~ "/edit?return_to=instances", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
           {% if i.state == 'running' %}
           <form method="post" action="/instances/{{ i.id }}/stop" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">

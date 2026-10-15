@@ -55,6 +55,26 @@
   </div>
 </main>
 {% if user %}
+<div class="modal-overlay" id="formModal" aria-hidden="true">
+  <div id="formModalInner"></div>
+</div>
+<div class="modal-overlay" id="logModal" aria-hidden="true">
+  <div id="logModalInner"></div>
+</div>
+<div class="modal-overlay" id="confirmModal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle" aria-describedby="confirmModalBody" data-tone="danger">
+    <div class="modal-header">
+      <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-alert-outline" id="confirmModalIcon"></span></div>
+      <h2 class="modal-title" id="confirmModalTitle">Подтверждение</h2>
+      <button type="button" class="icon-button modal-close" id="confirmModalClose" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+    </div>
+    <div class="modal-body" id="confirmModalBody"></div>
+    <div class="modal-footer">
+      <button type="button" class="button" id="confirmModalCancel" data-close-modal>Отмена</button>
+      <button type="button" class="button danger" id="confirmModalOk">Подтвердить</button>
+    </div>
+  </div>
+</div>
 <div class="toast-container" id="toastContainer"></div>
 <script src="/static/app.js"></script>
 {% endif %}

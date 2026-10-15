@@ -158,6 +158,8 @@ class HttpTests(unittest.TestCase):
             empty = self.client.get("/instances/new")
             self.assertEqual(empty.status_code, 200)
             self.assertIn('id="instance-port"', empty.text)
+            self.assertIn("page-modal", empty.text)
+            self.assertIn('id="instanceFormModal"', empty.text)
             self.assertIn('value="3100"', empty.text)
             self.assertIn("Подставлен первый свободный порт", empty.text)
 
@@ -222,6 +224,8 @@ class HttpTests(unittest.TestCase):
             edit = self.client.get(f"/instances/{first_id}/edit")
             self.assertEqual(edit.status_code, 200)
             self.assertIn('value="3100"', edit.text)
+            self.assertIn('data-close-href="/instances"', edit.text)
+            self.assertIn("js-form-modal-dialog", edit.text)
             self.assertEqual(self._port_input_class(edit.text), "input")
             occupied = html.unescape(edit.text)
             self.assertNotIn('"slug": "port-a"', occupied)
@@ -240,6 +244,23 @@ class HttpTests(unittest.TestCase):
             )
             self.assertEqual(edit_conflict.status_code, 409)
             self.assertEqual(self._port_input_class(edit_conflict.text), "input input-invalid")
+            saved = self.client.post(
+                f"/instances/{first_id}/edit",
+                data={
+                    "csrf_token": csrf,
+                    "name": "Порт A",
+                    "port": "3100",
+                    "db_profile_id": profile_id,
+                    "git_branch": "main",
+                    "return_to": "instances",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(saved.status_code, 302)
+            self.assertTrue(
+                saved.headers.get("location", "").startswith("/instances?"),
+                saved.headers.get("location", ""),
+            )
             self.assertIn("уже занят инстансом «Новый»", edit_conflict.text)
 
     def _port_input_class(self, html: str) -> str:
@@ -396,6 +417,10 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(listing.status_code, 200)
         self.assertIn('id="instances-bulk-form"', listing.text)
         self.assertIn('name="instance_ids"', listing.text)
+        self.assertIn('id="confirmModal"', listing.text)
+        self.assertIn('hx-target="#formModalInner"', listing.text)
+        self.assertIn('data-instances-bulk="start"', listing.text)
+        self.assertIn('data-instance-name="Bulk A"', listing.text)
 
         csrf = self._admin_csrf()
         empty = self.client.post(
@@ -466,6 +491,74 @@ class HttpTests(unittest.TestCase):
                 (i1, i2),
             ).fetchone()
         self.assertEqual(stop_rows["c"], 1)
+
+    def test_confirm_modal_markup(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        for path in ("/", "/instances", "/databases", "/users"):
+            page = self.client.get(path)
+            self.assertEqual(page.status_code, 200, path)
+            self.assertIn('id="confirmModal"', page.text)
+
+        csrf = self._admin_csrf()
+        self.client.post(
+            "/users",
+            data={
+                "csrf_token": csrf,
+                "username": "modaluser",
+                "password": "temppass1",
+                "role": "viewer",
+            },
+            follow_redirects=False,
+        )
+        users_page = self.client.get("/users")
+        self.assertIn("data-confirm", users_page.text)
+        self.assertIn("Удалить пользователя?", users_page.text)
+        self.assertIn('id="userCreateModal"', users_page.text)
+        self.assertIn('data-open-modal="userCreateModal"', users_page.text)
+        self.assertNotIn("onsubmit=", users_page.text)
+
+        from app.db import Database
+        from app.repositories import create_instance, list_users, save_db_profile
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="modal-profile",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        iid = create_instance(
+            db,
+            slug="modal-inst",
+            name="Modal Inst",
+            port=3212,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+        )
+        db_page = self.client.get("/databases")
+        self.assertIn("data-confirm", db_page.text)
+        self.assertIn("Удалить профиль БД?", db_page.text)
+        self.assertIn('hx-target="#formModalInner"', db_page.text)
+        self.assertIn("/databases/new", db_page.text)
+        self.assertNotIn("onsubmit=", db_page.text)
+        new_db = self.client.get("/databases/new")
+        self.assertEqual(new_db.status_code, 200)
+        self.assertIn("page-modal", new_db.text)
+        detail = self.client.get(f"/instances/{iid}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("data-confirm", detail.text)
+        self.assertIn("Удалить инстанс?", detail.text)
+        self.assertNotIn("onsubmit=", detail.text)
 
 
 if __name__ == "__main__":
