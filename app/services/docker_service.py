@@ -17,6 +17,19 @@ from docker.models.containers import Container
 UI_APP_UID = 1001
 UI_APP_GID = 1001
 
+COMPOSE_UI_BUILD_MAX_ATTEMPTS = 3
+COMPOSE_UI_BUILD_RETRY_DELAY_SEC = 5
+
+
+def compose_build_apk_dns_retryable(output: str) -> bool:
+    """Кратковременный сбой apk в Alpine build (индекс не скачался из‑за DNS)."""
+    text = output
+    if "DNS: transient error" in text:
+        return True
+    if "unable to select packages" in text and "no such package" in text:
+        return True
+    return False
+
 
 def prepare_ui_data_mount(host_dir: Path) -> Path:
     """Каталог на хосте для bind-mount в /app/server/data (sessions.db и пр.)."""
@@ -25,7 +38,11 @@ def prepare_ui_data_mount(host_dir: Path) -> Path:
     try:
         os.chown(host_dir, UI_APP_UID, UI_APP_GID)
     except OSError:
-        pass
+        # Менеджер без root (локальный запуск) не может chown → UI (uid 1001) пишет в mount.
+        try:
+            host_dir.chmod(0o777)
+        except OSError:
+            pass
     return host_dir
 
 
@@ -127,20 +144,40 @@ class DockerService:
             f"BUILD_DATE={build_date}",
             "grapes-nta",
         ]
-        proc = subprocess.run(
-            cmd,
-            cwd=str(ui_dir),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if log_callback:
-            if proc.stdout:
-                for line in proc.stdout.splitlines():
-                    log_callback(line)
-            if proc.stderr:
-                for line in proc.stderr.splitlines():
-                    log_callback(line)
+        proc: subprocess.CompletedProcess[str] | None = None
+        for attempt in range(1, COMPOSE_UI_BUILD_MAX_ATTEMPTS + 1):
+            proc = subprocess.run(
+                cmd,
+                cwd=str(ui_dir),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if log_callback:
+                if proc.stdout:
+                    for line in proc.stdout.splitlines():
+                        log_callback(line)
+                if proc.stderr:
+                    for line in proc.stderr.splitlines():
+                        log_callback(line)
+            if proc.returncode == 0:
+                break
+            combined = f"{proc.stdout or ''}\n{proc.stderr or ''}"
+            if (
+                attempt < COMPOSE_UI_BUILD_MAX_ATTEMPTS
+                and compose_build_apk_dns_retryable(combined)
+            ):
+                if log_callback:
+                    log_callback(
+                        "docker compose build: apk/DNS transient error, "
+                        f"retry {attempt + 1}/{COMPOSE_UI_BUILD_MAX_ATTEMPTS} "
+                        f"in {COMPOSE_UI_BUILD_RETRY_DELAY_SEC}s"
+                    )
+                time.sleep(COMPOSE_UI_BUILD_RETRY_DELAY_SEC)
+                continue
+            msg = proc.stderr.strip() or proc.stdout.strip() or "docker compose build failed"
+            raise RuntimeError(msg)
+        assert proc is not None
         if proc.returncode != 0:
             msg = proc.stderr.strip() or proc.stdout.strip() or "docker compose build failed"
             raise RuntimeError(msg)

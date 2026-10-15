@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.services.docker_service import _tar_build_context
+from app.services.docker_service import _tar_build_context, compose_build_apk_dns_retryable
 
 
 class DockerContextTarTests(unittest.TestCase):
@@ -18,6 +18,25 @@ class DockerContextTarTests(unittest.TestCase):
                 names = tar.getnames()
             self.assertIn("Dockerfile", names)
             self.assertIn("app.txt", names)
+
+
+class ComposeBuildRetryTests(unittest.TestCase):
+    def test_detects_dns_transient(self):
+        sample = (
+            "WARNING: fetching https://dl-cdn.alpinelinux.org/...: DNS: transient error "
+            "(try again later)\n"
+        )
+        self.assertTrue(compose_build_apk_dns_retryable(sample))
+
+    def test_detects_apk_index_failure(self):
+        sample = (
+            "ERROR: unable to select packages:\n"
+            "  libcap (no such package):\n"
+        )
+        self.assertTrue(compose_build_apk_dns_retryable(sample))
+
+    def test_other_failures_not_retryable(self):
+        self.assertFalse(compose_build_apk_dns_retryable("COPY failed: file not found"))
 
 
 if __name__ == "__main__":

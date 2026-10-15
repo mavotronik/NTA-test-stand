@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,13 @@ class UiDataMountTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = prepare_ui_data_mount(Path(tmp) / "inst" / "data")
             self.assertTrue(path.is_dir())
+
+    def test_prepare_chmod_fallback_when_not_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "inst" / "data"
+            prepare_ui_data_mount(path)
+            if os.geteuid() != 0:
+                self.assertEqual(path.stat().st_mode & 0o777, 0o777)
 
 
 if __name__ == "__main__":
