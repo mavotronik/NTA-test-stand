@@ -42,6 +42,8 @@ from app.repositories import (
     get_build,
     get_db_profile,
     get_instance,
+    get_instance_active_job,
+    get_instance_job,
     list_audit,
     list_builds,
     list_db_profiles,
@@ -97,6 +99,45 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+JOB_TYPE_LABELS: dict[str, str] = {
+    "build": "Сборка",
+    "deploy": "Развёртывание",
+    "build_run": "Сборка и запуск",
+}
+
+
+def _job_log_lines(db: Database, job_id: str) -> list[str]:
+    with db.connection() as conn:
+        return [
+            r["line"]
+            for r in conn.execute(
+                "SELECT line FROM job_logs WHERE job_id=? ORDER BY id", (job_id,)
+            ).fetchall()
+        ]
+
+
+def _instance_watch_job(db: Database, instance_id: str, job_param: str = "") -> dict[str, Any] | None:
+    """Логи и «Открыть UI» только для «Собрать и запустить» (?job=…)."""
+    if not job_param.strip():
+        return None
+    job = get_instance_job(db, instance_id, job_param.strip())
+    if job and job["job_type"] == "build_run":
+        return job
+    return None
+
+
+def _instance_current_task(db: Database, instance_id: str) -> dict[str, Any] | None:
+    active = get_instance_active_job(db, instance_id)
+    if active:
+        return active
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM deployment_jobs WHERE instance_id=? ORDER BY created_at DESC LIMIT 1",
+            (instance_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 AUDIT_ACTION_LABELS: dict[str, str] = {
     "login": "Вход в систему",
     "login_failed": "Неудачный вход",
@@ -108,6 +149,7 @@ AUDIT_ACTION_LABELS: dict[str, str] = {
     "instance_delete": "Удаление инстанса",
     "instance_rollback": "Откат образа",
     "build_queue": "Постановка сборки в очередь",
+    "build_run_queue": "Сборка и запуск",
     "build_retry": "Повтор сборки",
     "deploy_queue": "Постановка развёртывания в очередь",
     "db_profile_save": "Сохранение профиля БД",
@@ -129,6 +171,7 @@ AUDIT_ACTION_ICONS: dict[str, str] = {
     "instance_delete": "mdi-delete",
     "instance_rollback": "mdi-backup-restore",
     "build_queue": "mdi-docker",
+    "build_run_queue": "mdi-play-circle",
     "build_retry": "mdi-refresh",
     "deploy_queue": "mdi-rocket-launch",
     "db_profile_save": "mdi-database-edit",
@@ -585,6 +628,10 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
             "SELECT * FROM deployment_jobs WHERE instance_id=? ORDER BY created_at DESC LIMIT 20",
             (instance_id,),
         ).fetchall()]
+    job_param = request.query_params.get("job", "")
+    watch_job = _instance_watch_job(db, instance_id, job_param)
+    current_task = _instance_current_task(db, instance_id)
+    watch_logs = _job_log_lines(db, watch_job["id"]) if watch_job else []
     return _render(
         request,
         "instance_detail.html",
@@ -593,6 +640,10 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
             "active": "instances",
             "instance": inst,
             "jobs": jobs,
+            "watch_job": watch_job,
+            "watch_logs": watch_logs,
+            "current_task": current_task,
+            "job_type_labels": JOB_TYPE_LABELS,
             "public_host": settings.policy.public_host,
             "message": message,
             "error": error,
@@ -638,9 +689,104 @@ async def instance_build(
     inst = get_instance(db, instance_id)
     if not inst:
         raise HTTPException(404)
-    jid = queue_job(db, instance_id, "build", user["id"])
+    try:
+        jid = queue_job(db, instance_id, "build", user["id"])
+    except ValueError as err:
+        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
     write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="build_queue", target_type="job", target_id=jid, ip=_client_ip(request))
     return RedirectResponse(f"/instances/{instance_id}?message=build+queued", status_code=302)
+
+
+@app.post("/instances/{instance_id}/build-run")
+async def instance_build_run(
+    request: Request,
+    instance_id: str,
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+    _worker=Depends(get_worker),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    try:
+        jid = queue_job(db, instance_id, "build_run", user["id"])
+    except ValueError as err:
+        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="build_run_queue",
+        target_type="job",
+        target_id=jid,
+        ip=_client_ip(request),
+    )
+    return RedirectResponse(f"/instances/{instance_id}?job={jid}", status_code=302)
+
+
+@app.get("/instances/{instance_id}/jobs/{job_id}/status", response_class=HTMLResponse)
+async def instance_job_status_partial(
+    request: Request,
+    instance_id: str,
+    job_id: str,
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    job = get_instance_job(db, instance_id, job_id)
+    if not job:
+        raise HTTPException(404)
+    return _render(
+        request,
+        "partials/instance_job_status.html",
+        {
+            "user": user,
+            "instance": inst,
+            "job": job,
+            "job_type_labels": JOB_TYPE_LABELS,
+            "public_host": settings.policy.public_host,
+        },
+    )
+
+
+@app.get("/instances/{instance_id}/jobs/{job_id}/logs", response_class=HTMLResponse)
+async def instance_job_logs_partial(
+    request: Request,
+    instance_id: str,
+    job_id: str,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    if not get_instance(db, instance_id):
+        raise HTTPException(404)
+    if not get_instance_job(db, instance_id, job_id):
+        raise HTTPException(404)
+    logs = _job_log_lines(db, job_id)
+    return _render(request, "partials/job_log_text.html", {"logs": logs})
+
+
+@app.get("/instances/{instance_id}/current-task", response_class=HTMLResponse)
+async def instance_current_task_partial(
+    request: Request,
+    instance_id: str,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    if not get_instance(db, instance_id):
+        raise HTTPException(404)
+    task = _instance_current_task(db, instance_id)
+    return _render(
+        request,
+        "partials/instance_current_task.html",
+        {"user": user, "task": task, "job_type_labels": JOB_TYPE_LABELS},
+    )
 
 
 @app.post("/instances/{instance_id}/deploy")

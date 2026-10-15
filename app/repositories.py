@@ -249,16 +249,44 @@ def update_profile_check(db: Database, profile_id: str, ok: bool, msg: str) -> N
         )
 
 
+INSTANCE_ACTIVE_JOB_TYPES = ("deploy", "build", "build_run")
+
+
+def get_instance_job(db: Database, instance_id: str, job_id: str) -> dict[str, Any] | None:
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM deployment_jobs WHERE id=? AND instance_id=?",
+            (job_id, instance_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_instance_active_job(db: Database, instance_id: str) -> dict[str, Any] | None:
+    placeholders = ",".join("?" * len(INSTANCE_ACTIVE_JOB_TYPES))
+    with db.connection() as conn:
+        row = conn.execute(
+            f"""
+            SELECT * FROM deployment_jobs
+            WHERE instance_id=? AND status IN ('queued','running')
+              AND job_type IN ({placeholders})
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (instance_id, *INSTANCE_ACTIVE_JOB_TYPES),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def queue_job(db: Database, instance_id: str, job_type: str, user_id: str) -> str:
     jid = new_id()
     with db.connection() as conn:
         active = conn.execute(
-            """
+            f"""
             SELECT 1 FROM deployment_jobs
-            WHERE instance_id=? AND status IN ('queued','running') AND job_type IN ('deploy','build')
+            WHERE instance_id=? AND status IN ('queued','running') AND job_type IN ({",".join("?" * len(INSTANCE_ACTIVE_JOB_TYPES))})
             LIMIT 1
             """,
-            (instance_id,),
+            (instance_id, *INSTANCE_ACTIVE_JOB_TYPES),
         ).fetchone()
         if active:
             raise ValueError("conflicting job already active")

@@ -502,6 +502,33 @@
             color: var(--text-secondary);
         }
 
+        .job-log-header {
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .job-log-autoscroll-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .instance-job-success-actions {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+            padding-top: 0 !important;
+            border-top: 1px solid var(--border);
+        }
+
+        .instance-current-task-line {
+            margin: 0;
+        }
+
         .job-log-body {
             padding: 0 !important;
         }

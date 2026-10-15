@@ -25,6 +25,10 @@
     <p>Контейнер: <code>{{ instance.container_id[:12] if instance.container_id else '—' }}</code></p>
   </div></div>
   <div class="card"><div class="card-header"><div class="card-title">Действия</div></div><div class="card-body">
+    <form method="post" action="/instances/{{ instance.id }}/build-run" style="margin-bottom:8px;">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button class="button primary" type="submit"><span class="mdi mdi-play-circle"></span> Собрать и запустить</button>
+    </form>
     <form method="post" action="/instances/{{ instance.id }}/build" style="margin-bottom:8px;">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
       <button class="button" type="submit"><span class="mdi mdi-docker"></span> Собрать образ</button>
@@ -51,6 +55,19 @@
     {% endif %}
   </div></div>
 </div>
+{% if watch_job %}
+{% with job=watch_job %}{% include "partials/instance_job_watch.html" %}{% endwith %}
+{% endif %}
+<div class="card" style="margin-top:18px;">
+  <div class="card-header"><div class="card-title">Текущая задача</div></div>
+  <div class="card-body"
+       id="instance-current-task"
+       hx-get="/instances/{{ instance.id }}/current-task"
+       hx-trigger="load, every 2s"
+       hx-swap="innerHTML">
+    {% include "partials/instance_current_task.html" %}
+  </div>
+</div>
 <div class="card" style="margin-top:18px;">
   <div class="card-header"><div class="card-title">Задачи</div></div>
   <div class="table-wrapper">
@@ -59,7 +76,7 @@
       <tbody>
       {% for j in jobs %}
       <tr>
-        <td>{{ j.id[:10] }}…</td><td>{{ j.job_type }}</td><td>{{ j.status }}</td><td>{{ j.stage }}</td><td>{{ j.created_at }}</td>
+        <td>{{ j.id[:10] }}…</td><td>{{ job_type_labels.get(j.job_type, j.job_type) }}</td><td>{{ j.status }}</td><td>{{ j.stage }}</td><td>{{ j.created_at }}</td>
         <td><a class="button" href="/deployments/{{ j.id }}"><span class="mdi mdi-text-box-outline"></span> Логи</a></td>
       </tr>
       {% else %}

@@ -1,0 +1,9 @@
+{% if task %}
+<p class="instance-current-task-line">
+  <strong>{{ job_type_labels.get(task.job_type, task.job_type) }}</strong>
+  · {{ task.status }} · {{ task.stage }}
+  {% if task.status in ('queued', 'running') %}<span class="status"><span class="status-dot status-warning"></span></span>{% endif %}
+</p>
+{% else %}
+<p class="instance-current-task-line" style="color:var(--text-secondary);">Нет задач</p>
+{% endif %}

@@ -1,4 +1,7 @@
-<div class="card-header"><div class="card-title">Лог · {{ job.status }}</div></div>
+<div class="card-header job-log-header">
+  <div class="card-title">Лог · {{ job.status }}</div>
+  {% include "partials/job_log_autoscroll_toggle.html" %}
+</div>
 <div class="card-body job-log-body">
   <pre class="job-log-pre">{% include "partials/job_log_text.html" %}</pre>
 </div>

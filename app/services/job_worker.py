@@ -88,6 +88,31 @@ class JobWorker:
             finally:
                 with self._lock:
                     self._deploying -= 1
+        elif job_type == "build_run":
+            with self._lock:
+                if (
+                    self._building >= self.settings.policy.build_max_parallel
+                    or self._deploying >= self.settings.policy.deploy_max_parallel
+                ):
+                    return
+                self._building += 1
+                self._deploying += 1
+            try:
+                self._run_build_run(dict(job))
+            finally:
+                with self._lock:
+                    self._building -= 1
+                    self._deploying -= 1
+
+    def _run_build_run(self, job: dict) -> None:
+        self._run_build(job, defer_deploy=True)
+        with self.db.connection() as conn:
+            row = conn.execute(
+                "SELECT status FROM deployment_jobs WHERE id=?", (job["id"],)
+            ).fetchone()
+        if not row or row["status"] != "running":
+            return
+        self._run_deploy(job)
 
     def _prepare_ui_build_context(self, repo: Path, commit: str) -> tuple[Path, Path, Path, str, Path]:
         pol = self.settings.policy
@@ -108,7 +133,7 @@ class JobWorker:
         bkey = git_service.build_key_for_commit(commit, df, ctx)
         return wt, ctx, df, bkey, ui_compose_dir
 
-    def _run_build(self, job: dict) -> None:
+    def _run_build(self, job: dict, *, defer_deploy: bool = False) -> None:
         job_id = job["id"]
         active_build_id: str | None = None
         self._set_job(job_id, "running", "resolve_commit")
@@ -132,7 +157,10 @@ class JobWorker:
                 ).fetchone()
             if existing:
                 append_job_log(self.db, job_id, f"reuse image {existing['image_tag']}")
-                self._set_job(job_id, "done", "ready", build_id=existing["id"])
+                if defer_deploy:
+                    self._set_job(job_id, "running", "deploy", build_id=existing["id"])
+                else:
+                    self._set_job(job_id, "done", "ready", build_id=existing["id"])
                 return
             build_id = job.get("build_id") or new_id()
             active_build_id = build_id
@@ -176,7 +204,10 @@ class JobWorker:
                     """,
                     (image_id, utc_now(), build_id),
                 )
-            self._set_job(job_id, "done", "ready", build_id=build_id)
+            if defer_deploy:
+                self._set_job(job_id, "running", "deploy", build_id=build_id)
+            else:
+                self._set_job(job_id, "done", "ready", build_id=build_id)
         except Exception as err:
             append_job_log(self.db, job_id, f"ERROR: {err}")
             if active_build_id:
