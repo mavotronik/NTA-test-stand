@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -69,6 +70,65 @@ class HttpTests(unittest.TestCase):
         r2 = self.client.get("/")
         self.assertEqual(r2.status_code, 200)
         self.assertIn("Обзор", r2.text)
+
+    def _admin_csrf(self) -> str:
+        r = self.client.get("/users")
+        self.assertEqual(r.status_code, 200)
+        m = re.search(r'name="csrf_token" value="([^"]+)"', r.text)
+        self.assertIsNotNone(m)
+        return m.group(1)
+
+    def test_user_password_and_delete(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        csrf = self._admin_csrf()
+        r = self.client.post(
+            "/users",
+            data={
+                "csrf_token": csrf,
+                "username": "tempuser",
+                "password": "temppass1",
+                "role": "viewer",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(r.status_code, 302)
+        csrf = self._admin_csrf()
+        from app.deps import get_settings
+        from app.db import Database
+        from app.repositories import list_users
+
+        db = Database(get_settings().db_path)
+        users = list_users(db)
+        admin_id = next(u["id"] for u in users if u["username"] == "admin")
+        uid = next(u["id"] for u in users if u["username"] == "tempuser")
+        r_self = self.client.post(
+            f"/users/{admin_id}/delete",
+            data={"csrf_token": csrf},
+            follow_redirects=False,
+        )
+        self.assertEqual(r_self.status_code, 400)
+        csrf = self._admin_csrf()
+        r_pwd = self.client.post(
+            f"/users/{uid}/password",
+            data={"csrf_token": csrf, "password": "newpass99"},
+            follow_redirects=False,
+        )
+        self.assertEqual(r_pwd.status_code, 302)
+        c2 = TestClient(self.app)
+        with c2:
+            r_login = c2.post(
+                "/login",
+                data={"username": "tempuser", "password": "newpass99"},
+                follow_redirects=False,
+            )
+            self.assertIn(r_login.status_code, (302, 303))
+            csrf = self._admin_csrf()
+            r_del = self.client.post(
+                f"/users/{uid}/delete",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+            self.assertEqual(r_del.status_code, 302)
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@
         <td>{{ i.port }}</td>
         <td>{{ i.db_profile_name }}</td>
         <td>{{ (i.git_commit or '')[:12] }}</td>
-        <td><a class="button" href="/instances/{{ i.id }}">Открыть</a></td>
+        <td><a class="button" href="/instances/{{ i.id }}"><span class="mdi mdi-open-in-app"></span> Открыть</a></td>
       </tr>
       {% else %}
       <tr><td colspan="6">Нет инстансов</td></tr>

@@ -407,6 +407,19 @@
             color: white;
         }
 
+        .button > .mdi {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .cell-ellipsis {
+            display: block;
+            max-width: 280px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         /* =====================================================
            METRICS
         ===================================================== */

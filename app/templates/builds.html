@@ -16,18 +16,18 @@
       <span class="status-dot status-{{ 'online' if st == 'ready' else ('warning' if st == 'building' else 'offline') }}"></span>
       {{ st }}
     </span>
-    {% if b.error %}<div style="font-size:12px;color:var(--text-secondary);max-width:280px;">{{ b.error[:120] }}{% if b.error|length > 120 %}…{% endif %}</div>{% endif %}
+    {% if b.error %}<span class="cell-ellipsis" style="font-size:12px;color:var(--text-secondary);" title="{{ b.error }}">{{ b.error }}</span>{% endif %}
   </td>
   <td>{% if b.instance_name %}{{ b.instance_name }}{% elif b.last_instance_id %}<span style="color:var(--text-secondary);">—</span>{% else %}—{% endif %}</td>
   <td><code>{{ b.image_tag or '—' }}</code></td>
   <td>{{ b.created_at }}</td>
   <td style="white-space:nowrap;">
-    {% if b.last_job_id %}<a class="button" href="/deployments/{{ b.last_job_id }}">Логи</a>{% endif %}
+    {% if b.last_job_id %}<a class="button" href="/deployments/{{ b.last_job_id }}"><span class="mdi mdi-text-box-outline"></span> Логи</a>{% endif %}
     {% set st = b.display_status or b.status %}
     {% if user.role in ('admin', 'operator') and st in ('failed', 'building') and b.last_instance_id %}
     <form method="post" action="/builds/{{ b.id }}/retry" style="display:inline;" onsubmit="return confirm('Повторить сборку?');">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
-      <button class="button primary" type="submit">Повторить</button>
+      <button class="button primary" type="submit"><span class="mdi mdi-refresh"></span> Повторить</button>
     </form>
     {% endif %}
   </td>

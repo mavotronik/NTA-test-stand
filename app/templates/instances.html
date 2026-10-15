@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
   <div><h1 class="page-title">Инстансы</h1></div>
-  <div class="page-actions"><a class="button primary" href="/instances/new">Создать</a></div>
+  <div class="page-actions"><a class="button primary" href="/instances/new"><span class="mdi mdi-plus"></span> Создать</a></div>
 </div>
 {% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
 {% if error %}<p style="color:var(--danger);">{{ error }}</p>{% endif %}
@@ -21,9 +21,9 @@
         <td>{{ i.db_profile_name }}</td>
         <td>{{ i.git_branch }}</td>
         <td>
-          <a class="button" href="/instances/{{ i.id }}">Детали</a>
+          <a class="button" href="/instances/{{ i.id }}"><span class="mdi mdi-eye-outline"></span> Детали</a>
           {% if user.role in ('admin', 'operator') %}
-          <a class="button" href="/instances/{{ i.id }}/edit">Изменить</a>
+          <a class="button" href="/instances/{{ i.id }}/edit"><span class="mdi mdi-pencil"></span> Изменить</a>
           {% endif %}
         </td>
       </tr>

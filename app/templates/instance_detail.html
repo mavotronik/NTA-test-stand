@@ -8,9 +8,9 @@
   </div>
   <div class="page-actions">
     {% if user.role in ('admin', 'operator') %}
-    <a class="button" href="/instances/{{ instance.id }}/edit">Изменить</a>
+    <a class="button" href="/instances/{{ instance.id }}/edit"><span class="mdi mdi-pencil"></span> Изменить</a>
     {% endif %}
-    <a class="button" href="http://{{ public_host }}:{{ instance.port }}/" target="_blank" rel="noopener">Открыть UI</a>
+    <a class="button" href="http://{{ public_host }}:{{ instance.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
   </div>
 </div>
 {% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
@@ -27,26 +27,26 @@
   <div class="card"><div class="card-header"><div class="card-title">Действия</div></div><div class="card-body">
     <form method="post" action="/instances/{{ instance.id }}/build" style="margin-bottom:8px;">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
-      <button class="button" type="submit">Собрать образ</button>
+      <button class="button" type="submit"><span class="mdi mdi-docker"></span> Собрать образ</button>
     </form>
     <form method="post" action="/instances/{{ instance.id }}/deploy" style="margin-bottom:8px;">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
-      <button class="button primary" type="submit">Развернуть</button>
+      <button class="button primary" type="submit"><span class="mdi mdi-rocket-launch"></span> Развернуть</button>
     </form>
     {% if instance.rollback_image_tag %}
     <form method="post" action="/instances/{{ instance.id }}/rollback" style="margin-bottom:8px;">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
-      <button class="button" type="submit">Откатить образ</button>
+      <button class="button" type="submit"><span class="mdi mdi-backup-restore"></span> Откатить образ</button>
     </form>
     {% endif %}
     <form method="post" action="/instances/{{ instance.id }}/stop" style="margin-bottom:8px;">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
-      <button class="button danger" type="submit">Остановить</button>
+      <button class="button danger" type="submit"><span class="mdi mdi-stop"></span> Остановить</button>
     </form>
     {% if user.role in ('admin', 'operator') %}
     <form method="post" action="/instances/{{ instance.id }}/delete" onsubmit="return confirm('Удалить инстанс {{ instance.name }}? Контейнер будет остановлен.');">
       <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
-      <button class="button danger" type="submit">Удалить инстанс</button>
+      <button class="button danger" type="submit"><span class="mdi mdi-delete"></span> Удалить инстанс</button>
     </form>
     {% endif %}
   </div></div>
@@ -60,7 +60,7 @@
       {% for j in jobs %}
       <tr>
         <td>{{ j.id[:10] }}…</td><td>{{ j.job_type }}</td><td>{{ j.status }}</td><td>{{ j.stage }}</td><td>{{ j.created_at }}</td>
-        <td><a href="/deployments/{{ j.id }}">Логи</a></td>
+        <td><a class="button" href="/deployments/{{ j.id }}"><span class="mdi mdi-text-box-outline"></span> Логи</a></td>
       </tr>
       {% else %}
       <tr><td colspan="6">Нет задач</td></tr>

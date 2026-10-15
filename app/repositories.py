@@ -415,3 +415,35 @@ def list_users(db: Database) -> list[dict[str, Any]]:
             "SELECT id, username, role, active, created_at, updated_at FROM users ORDER BY username"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_user(db: Database, user_id: str) -> dict[str, Any] | None:
+    with db.connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_user_password(db: Database, user_id: str, password_hash: str) -> None:
+    now = utc_now()
+    with db.connection() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash=?, updated_at=? WHERE id=?",
+            (password_hash, now, user_id),
+        )
+
+
+def count_active_admins(db: Database) -> int:
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE role='admin' AND active=1"
+        ).fetchone()
+    return int(row["c"])
+
+
+def delete_user(db: Database, user_id: str) -> None:
+    with db.connection() as conn:
+        conn.execute("UPDATE instances SET created_by=NULL WHERE created_by=?", (user_id,))
+        conn.execute("UPDATE instances SET updated_by=NULL WHERE updated_by=?", (user_id,))
+        conn.execute("UPDATE instance_configs SET created_by=NULL WHERE created_by=?", (user_id,))
+        conn.execute("UPDATE deployment_jobs SET requested_by=NULL WHERE requested_by=?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))

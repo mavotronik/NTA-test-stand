@@ -15,7 +15,7 @@
     <div class="switch-row"><div>TLS</div><label class="switch"><input type="checkbox" name="tls" value="1" {% if profile and profile.tls %}checked{% endif %}><span class="slider"></span></label></div>
     <div class="switch-row"><div>Writable (запись в БД)</div><label class="switch"><input type="checkbox" name="writable" value="1" {% if profile and profile.writable %}checked{% endif %}><span class="slider"></span></label></div>
     <div class="form-group"><label class="form-label">Комментарий</label><input class="input" name="comment" value="{{ profile.comment if profile else '' }}"></div>
-    <button class="button primary" type="submit">Сохранить</button>
+    <button class="button primary" type="submit"><span class="mdi mdi-content-save"></span> Сохранить</button>
   </form>
 </div></div>
 {% endblock %}

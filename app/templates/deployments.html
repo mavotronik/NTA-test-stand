@@ -8,7 +8,7 @@
 {% for j in jobs %}
 <tr>
   <td>{{ j.instance_name }}</td><td>{{ j.job_type }}</td><td>{{ j.status }}</td><td>{{ j.stage }}</td><td>{{ j.created_at }}</td>
-  <td><a href="/deployments/{{ j.id }}">Логи</a></td>
+  <td><a class="button" href="/deployments/{{ j.id }}"><span class="mdi mdi-text-box-outline"></span> Логи</a></td>
 </tr>
 {% else %}<tr><td colspan="6">Нет задач</td></tr>{% endfor %}
 </tbody></table></div></div>

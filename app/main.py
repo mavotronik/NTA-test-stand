@@ -48,6 +48,10 @@ from app.repositories import (
     list_jobs,
     list_ready_build_images,
     list_users,
+    get_user,
+    set_user_password,
+    count_active_admins,
+    delete_user,
     port_taken,
     queue_job,
     save_db_profile,
@@ -88,6 +92,56 @@ async def handle_http_exception(request: Request, exc: HTTPException):
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
+
+
+AUDIT_ACTION_LABELS: dict[str, str] = {
+    "login": "Вход в систему",
+    "login_failed": "Неудачный вход",
+    "logout": "Выход",
+    "instance_create": "Создание инстанса",
+    "instance_update": "Изменение инстанса",
+    "instance_stop": "Остановка инстанса",
+    "instance_delete": "Удаление инстанса",
+    "instance_rollback": "Откат образа",
+    "build_queue": "Постановка сборки в очередь",
+    "build_retry": "Повтор сборки",
+    "deploy_queue": "Постановка развёртывания в очередь",
+    "db_profile_save": "Сохранение профиля БД",
+    "db_profile_test": "Проверка профиля БД",
+    "db_profile_delete": "Удаление профиля БД",
+    "user_create": "Создание пользователя",
+    "user_password": "Смена пароля",
+    "user_delete": "Удаление пользователя",
+}
+
+AUDIT_ACTION_ICONS: dict[str, str] = {
+    "login": "mdi-login",
+    "login_failed": "mdi-alert-circle-outline",
+    "logout": "mdi-logout",
+    "instance_create": "mdi-server-plus",
+    "instance_update": "mdi-pencil",
+    "instance_stop": "mdi-stop",
+    "instance_delete": "mdi-delete",
+    "instance_rollback": "mdi-backup-restore",
+    "build_queue": "mdi-docker",
+    "build_retry": "mdi-refresh",
+    "deploy_queue": "mdi-rocket-launch",
+    "db_profile_save": "mdi-database-edit",
+    "db_profile_test": "mdi-lan-check",
+    "db_profile_delete": "mdi-database-remove",
+    "user_create": "mdi-account-plus",
+    "user_password": "mdi-key",
+    "user_delete": "mdi-account-remove",
+}
+
+AUDIT_ACTION_TONE: dict[str, str] = {
+    "login_failed": "danger",
+    "instance_stop": "warning",
+    "instance_delete": "warning",
+    "instance_rollback": "warning",
+    "db_profile_delete": "warning",
+    "user_delete": "warning",
+}
 
 
 def _render(request: Request, name: str, ctx: dict[str, Any], status: int = 200) -> HTMLResponse:
@@ -839,7 +893,18 @@ async def deployment_logs_partial(request: Request, job_id: str, db: Database = 
 
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request, db: Database = Depends(get_db), user=Depends(current_user)):
-    return _render(request, "audit.html", {"user": user, "active": "audit", "events": list_audit(db)})
+    return _render(
+        request,
+        "audit.html",
+        {
+            "user": user,
+            "active": "audit",
+            "events": list_audit(db),
+            "audit_action_labels": AUDIT_ACTION_LABELS,
+            "audit_action_icons": AUDIT_ACTION_ICONS,
+            "audit_action_tone": AUDIT_ACTION_TONE,
+        },
+    )
 
 
 @app.get("/users", response_class=HTMLResponse)
@@ -870,3 +935,67 @@ async def users_create(
         )
     write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="user_create", detail={"username": username, "role": role}, ip=_client_ip(request))
     return RedirectResponse("/users", status_code=302)
+
+
+@app.post("/users/{user_id}/password")
+async def users_set_password(
+    request: Request,
+    user_id: str,
+    password: str = Form(...),
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "admin")
+    verify_csrf(request, user, csrf_token)
+    target = get_user(db, user_id)
+    if not target:
+        raise HTTPException(404)
+    pwd = password.strip()
+    if not pwd:
+        raise HTTPException(400, "password required")
+    set_user_password(db, user_id, hash_password(pwd))
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="user_password",
+        target_type="user",
+        target_id=user_id,
+        detail={"username": target["username"]},
+        ip=_client_ip(request),
+    )
+    return RedirectResponse("/users?message=password", status_code=302)
+
+
+@app.post("/users/{user_id}/delete")
+async def users_delete(
+    request: Request,
+    user_id: str,
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "admin")
+    verify_csrf(request, user, csrf_token)
+    if user_id == user["id"]:
+        raise HTTPException(400, "cannot delete self")
+    target = get_user(db, user_id)
+    if not target:
+        raise HTTPException(404)
+    if target["role"] == "admin" and target["active"] and count_active_admins(db) <= 1:
+        raise HTTPException(400, "last admin")
+    delete_user(db, user_id)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="user_delete",
+        target_type="user",
+        target_id=user_id,
+        detail={"username": target["username"]},
+        ip=_client_ip(request),
+    )
+    return RedirectResponse("/users?message=deleted", status_code=302)

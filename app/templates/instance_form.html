@@ -46,8 +46,8 @@
         </datalist>
         <p style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Если указан — «Развернуть» запускает этот образ без поиска сборки по commit. Пусто — нужна готовая сборка.</p>
       </div>
-      <button class="button primary" type="submit">{% if instance %}Сохранить{% else %}Создать{% endif %}</button>
-      {% if instance %}<a class="button" href="/instances/{{ instance.id }}" style="margin-left:8px;">Отмена</a>{% endif %}
+      <button class="button primary" type="submit"><span class="mdi mdi-{% if instance %}content-save{% else %}plus{% endif %}"></span> {% if instance %}Сохранить{% else %}Создать{% endif %}</button>
+      {% if instance %}<a class="button" href="/instances/{{ instance.id }}" style="margin-left:8px;"><span class="mdi mdi-close"></span> Отмена</a>{% endif %}
     </form>
   </div>
 </div>

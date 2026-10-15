@@ -1,12 +1,45 @@
 {% extends "base.html" %}
 {% block title %}Аудит{% endblock %}
 {% block content %}
-<div class="page-header"><div><h1 class="page-title">Аудит</h1></div></div>
-<div class="card"><div class="table-wrapper"><table>
-<thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Цель</th><th>OK</th></tr></thead>
-<tbody>
-{% for e in events %}
-<tr><td>{{ e.created_at }}</td><td>{{ e.username or '—' }}</td><td>{{ e.action }}</td><td>{{ e.target_type }} {{ e.target_id or '' }}</td><td>{{ 'да' if e.ok else 'нет' }}</td></tr>
-{% else %}<tr><td colspan="5">Пусто</td></tr>{% endfor %}
-</tbody></table></div></div>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Аудит</h1>
+    <div class="page-subtitle">Системные события</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-header"><div class="card-title">Последние события</div></div>
+  <div class="card-body">
+    <div class="list">
+      {% for e in events %}
+      {% set label = audit_action_labels.get(e.action, e.action) %}
+      {% set icon = audit_action_icons.get(e.action, 'mdi-information-outline') %}
+      {% if not e.ok %}
+      {% set tone = 'danger' %}
+      {% elif audit_action_tone.get(e.action) %}
+      {% set tone = audit_action_tone[e.action] %}
+      {% else %}
+      {% set tone = 'primary' %}
+      {% endif %}
+      {% set who = e.username or '—' %}
+      {% set target = '' %}
+      {% if e.target_type %}
+      {% set tid = (e.target_id or '')[:12] %}
+      {% set target = e.target_type ~ (' ' ~ tid if tid else '') %}
+      {% endif %}
+      <div class="list-item">
+        <div class="list-icon">
+          <span class="mdi {{ icon }}" style="color:var(--{{ tone }});"></span>
+        </div>
+        <div class="list-content">
+          <div class="list-title">{{ label }} · {{ who }}</div>
+          <div class="list-description">{{ e.created_at }}{% if target %} · {{ target }}{% endif %}{% if e.error %} · {{ e.error[:80] }}{% if e.error|length > 80 %}…{% endif %}{% endif %}</div>
+        </div>
+      </div>
+      {% else %}
+      <p style="color:var(--text-secondary);margin:0;">Пусто</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
 {% endblock %}

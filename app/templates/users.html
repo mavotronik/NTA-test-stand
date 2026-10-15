@@ -1,23 +1,63 @@
 {% extends "base.html" %}
 {% block title %}Пользователи{% endblock %}
 {% block content %}
-<div class="page-header"><div><h1 class="page-title">Пользователи</h1></div></div>
-{% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Пользователи</h1>
+    <div class="page-subtitle">Управление доступом</div>
+  </div>
+</div>
+{% if request.query_params.get('message') == 'password' %}<p style="color:var(--success);">Пароль обновлён</p>{% endif %}
+{% if request.query_params.get('message') == 'deleted' %}<p style="color:var(--success);">Пользователь удалён</p>{% endif %}
 <div class="grid-2">
-  <div class="card"><div class="card-header"><div class="card-title">Список</div></div><div class="table-wrapper"><table>
-  <thead><tr><th>Login</th><th>Role</th><th>Active</th></tr></thead>
-  <tbody>{% for u in users %}<tr><td>{{ u.username }}</td><td>{{ u.role }}</td><td>{{ u.active }}</td></tr>{% endfor %}</tbody>
-  </table></div></div>
-  <div class="card"><div class="card-header"><div class="card-title">Создать</div></div><div class="card-body">
-    <form method="post">
-      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
-      <div class="form-group"><label class="form-label">Login</label><input class="input" name="username" required></div>
-      <div class="form-group"><label class="form-label">Password</label><input class="input" type="password" name="password" required></div>
-      <div class="form-group"><label class="form-label">Role</label>
-        <select class="select" name="role"><option value="viewer">viewer</option><option value="operator">operator</option><option value="admin">admin</option></select>
-      </div>
-      <button class="button primary" type="submit">Создать</button>
-    </form>
-  </div></div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">Список</div></div>
+    <div class="table-wrapper"><table>
+      <thead><tr><th>Login</th><th>Role</th><th>Статус</th><th></th></tr></thead>
+      <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.username }}</td>
+        <td>{{ u.role }}</td>
+        <td>
+          <span class="status">
+            <span class="status-dot status-{{ 'online' if u.active else 'offline' }}"></span>
+            {{ 'Active' if u.active else 'Inactive' }}
+          </span>
+        </td>
+        <td style="white-space:nowrap;">
+          <form method="post" action="/users/{{ u.id }}/password" style="display:inline-flex;align-items:center;gap:6px;">
+            <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+            <input class="input" type="password" name="password" required placeholder="Новый пароль" style="width:140px;height:34px;" autocomplete="new-password">
+            <button class="button" type="submit"><span class="mdi mdi-key"></span> Сменить</button>
+          </form>
+          {% if u.id != user.id %}
+          <form method="post" action="/users/{{ u.id }}/delete" style="display:inline;" onsubmit="return confirm('Удалить пользователя {{ u.username }}?');">
+            <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+            <button class="button danger" type="submit"><span class="mdi mdi-delete"></span> Удалить</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Нет пользователей</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">Создать</div></div>
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+        <div class="form-group"><label class="form-label">Login</label><input class="input" name="username" required></div>
+        <div class="form-group"><label class="form-label">Password</label><input class="input" type="password" name="password" required autocomplete="new-password"></div>
+        <div class="form-group"><label class="form-label">Role</label>
+          <select class="select" name="role"><option value="viewer">viewer</option><option value="operator">operator</option><option value="admin">admin</option></select>
+        </div>
+        <button class="button primary" type="submit"><span class="mdi mdi-plus"></span> Создать</button>
+      </form>
+    </div>
+  </div>
 </div>
 {% endblock %}
