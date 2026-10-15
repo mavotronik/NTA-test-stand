@@ -284,19 +284,188 @@ class HttpTests(unittest.TestCase):
             )
         stopped = self.client.get("/instances")
         self.assertEqual(stopped.status_code, 200)
-        self.assertIn("mdi-play", stopped.text)
-        self.assertIn("Запустить", stopped.text)
-        self.assertIn("button success", stopped.text)
-        self.assertNotIn("mdi-stop", stopped.text)
+        self.assertIn(f"/instances/{iid}/start", stopped.text)
+        self.assertNotIn(f"/instances/{iid}/stop", stopped.text)
 
         with db.connection() as conn:
             conn.execute("UPDATE instances SET state='running' WHERE id=?", (iid,))
         running = self.client.get("/instances")
         self.assertEqual(running.status_code, 200)
-        self.assertIn("mdi-stop", running.text)
-        self.assertIn("Остановить", running.text)
-        self.assertIn("button danger", running.text)
-        self.assertNotIn("mdi-play", running.text)
+        self.assertIn(f"/instances/{iid}/stop", running.text)
+        self.assertNotIn(f"/instances/{iid}/start", running.text)
+
+    def test_instance_lifecycle_queues_jobs_without_blocking(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        from app.db import Database
+        from app.repositories import create_instance, list_users, save_db_profile
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="queue-profile",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        iid = create_instance(
+            db,
+            slug="queue-test",
+            name="Queue",
+            port=3201,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+        )
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE instances SET state='stopped', image_tag='demo:latest' WHERE id=?",
+                (iid,),
+            )
+        detail = self.client.get(f"/instances/{iid}")
+        self.assertEqual(detail.status_code, 200)
+        m = re.search(r'name="csrf_token" value="([^"]+)"', detail.text)
+        self.assertIsNotNone(m)
+        csrf = m.group(1)
+        r_start = self.client.post(
+            f"/instances/{iid}/start",
+            data={"csrf_token": csrf, "return_to": "instances"},
+            follow_redirects=False,
+        )
+        self.assertEqual(r_start.status_code, 302)
+        with db.connection() as conn:
+            row = conn.execute(
+                "SELECT job_type, status FROM deployment_jobs WHERE instance_id=? ORDER BY created_at DESC LIMIT 1",
+                (iid,),
+            ).fetchone()
+        self.assertEqual(row["job_type"], "instance_start")
+        self.assertEqual(row["status"], "queued")
+
+    def test_instances_bulk_actions(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        from app.db import Database
+        from app.repositories import create_instance, list_users, save_db_profile
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="bulk-profile",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        i1 = create_instance(
+            db,
+            slug="bulk-a",
+            name="Bulk A",
+            port=3210,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+        )
+        i2 = create_instance(
+            db,
+            slug="bulk-b",
+            name="Bulk B",
+            port=3211,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+        )
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE instances SET state='stopped', image_tag='demo:latest' WHERE id IN (?,?)",
+                (i1, i2),
+            )
+        listing = self.client.get("/instances")
+        self.assertEqual(listing.status_code, 200)
+        self.assertIn('id="instances-bulk-form"', listing.text)
+        self.assertIn('name="instance_ids"', listing.text)
+
+        csrf = self._admin_csrf()
+        empty = self.client.post(
+            "/instances/bulk",
+            data={"csrf_token": csrf, "action": "start"},
+            follow_redirects=False,
+        )
+        self.assertEqual(empty.status_code, 302)
+        self.assertIn("error=", empty.headers.get("location", ""))
+
+        csrf = self._admin_csrf()
+        r = self.client.post(
+            "/instances/bulk",
+            data={
+                "csrf_token": csrf,
+                "action": "start",
+                "instance_ids": [i1, i2],
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("message=", r.headers.get("location", ""))
+        with db.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT instance_id, job_type FROM deployment_jobs
+                WHERE instance_id IN (?,?) AND job_type='instance_start'
+                """,
+                (i1, i2),
+            ).fetchall()
+        self.assertEqual(len(rows), 2)
+
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE deployment_jobs SET status='done' WHERE instance_id IN (?,?) AND status IN ('queued','running')",
+                (i1, i2),
+            )
+
+        csrf = self._admin_csrf()
+        r_rebuild = self.client.post(
+            "/instances/bulk",
+            data={
+                "csrf_token": csrf,
+                "action": "rebuild",
+                "instance_ids": [i1],
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(r_rebuild.status_code, 302)
+        with db.connection() as conn:
+            row = conn.execute(
+                "SELECT job_type FROM deployment_jobs WHERE instance_id=? AND job_type='build_run' ORDER BY created_at DESC LIMIT 1",
+                (i1,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["job_type"], "build_run")
+
+        csrf = self._admin_csrf()
+        r_stop = self.client.post(
+            "/instances/bulk",
+            data={"csrf_token": csrf, "action": "stop", "instance_ids": [i1, i2]},
+            follow_redirects=False,
+        )
+        self.assertEqual(r_stop.status_code, 302)
+        with db.connection() as conn:
+            stop_rows = conn.execute(
+                "SELECT COUNT(*) AS c FROM deployment_jobs WHERE instance_id IN (?,?) AND job_type='instance_stop'",
+                (i1, i2),
+            ).fetchone()
+        self.assertEqual(stop_rows["c"], 1)
 
 
 if __name__ == "__main__":

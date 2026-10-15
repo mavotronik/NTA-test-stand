@@ -4,6 +4,7 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -37,7 +38,6 @@ from app.deps import (
 from app.repositories import (
     create_instance,
     delete_db_profile,
-    delete_instance,
     find_build_retry_instance,
     get_build,
     get_db_profile,
@@ -48,6 +48,7 @@ from app.repositories import (
     list_builds,
     list_db_profiles,
     list_instances,
+    list_job_log_rows,
     list_jobs,
     list_occupied_ports,
     list_ready_build_images,
@@ -66,7 +67,6 @@ from app.repositories import (
 )
 from app.services.audit import write_audit
 from app.services.clickhouse_check import check_clickhouse_connection
-from app.services.docker_service import DockerService
 from app.services import git_service
 
 APP_DIR = Path(__file__).resolve().parent
@@ -103,17 +103,15 @@ JOB_TYPE_LABELS: dict[str, str] = {
     "build": "Сборка",
     "deploy": "Развёртывание",
     "build_run": "Сборка и запуск",
+    "instance_stop": "Остановка инстанса",
+    "instance_start": "Запуск инстанса",
+    "instance_delete": "Удаление инстанса",
+    "instance_rollback": "Откат образа",
 }
 
 
-def _job_log_lines(db: Database, job_id: str) -> list[str]:
-    with db.connection() as conn:
-        return [
-            r["line"]
-            for r in conn.execute(
-                "SELECT line FROM job_logs WHERE job_id=? ORDER BY id", (job_id,)
-            ).fetchall()
-        ]
+def _job_log_lines(db: Database, job_id: str, *, after_id: int = 0) -> list[dict[str, Any]]:
+    return list_job_log_rows(db, job_id, after_id=after_id)
 
 
 def _instance_watch_job(db: Database, instance_id: str, job_param: str = "") -> dict[str, Any] | None:
@@ -371,37 +369,36 @@ def _instance_action_redirect(instance_id: str, return_to: str, *, message: str 
     return RedirectResponse(path, status_code=302)
 
 
-def _launch_instance_container(db: Database, settings, inst: dict[str, Any], image: str) -> tuple[str, bool]:
-    from app.crypto_util import decrypt_secret
+_BULK_INSTANCE_ACTIONS = {
+    "start": "instance_start",
+    "stop": "instance_stop",
+    "rebuild": "build_run",
+}
 
-    prof = get_db_profile(db, inst["db_profile_id"], include_secret=True)
-    if not prof:
-        raise HTTPException(400, "profile missing")
-    fernet = get_fernet(settings.fernet_key, settings.secret_key)
-    pwd = decrypt_secret(fernet, prof["password_enc"])
-    env = {
-        "CLICKHOUSE_URL": f"{'https' if prof['tls'] else 'http'}://{prof['host']}:{prof['port']}",
-        "CLICKHOUSE_USER": prof["username"],
-        "CLICKHOUSE_PASSWORD": pwd,
-        "CLICKHOUSE_DATABASE": prof["database_name"],
-        "SESSION_COOKIE_SECURE": "false",
-    }
-    name = f"grapes-test-{inst['slug']}"
-    data_dir = settings.instance_ui_data_dir(inst["slug"])
-    docker = DockerService()
-    cid = docker.run_instance_container(
-        name=name,
-        image=image,
-        port=int(inst["port"]),
-        env=env,
-        data_mount_host=data_dir,
-    )
-    ok = docker.wait_health_http(
-        int(inst["port"]),
-        settings.policy.health_timeout_sec,
-        settings.policy.health_interval_sec,
-    )
-    return cid, ok
+
+def _bulk_skip_reason(inst: dict[str, Any] | None, action: str) -> str | None:
+    if not inst:
+        return "не найден"
+    if action == "start":
+        if not (inst.get("image_tag") or "").strip():
+            return "нет образа"
+        if inst["state"] == "running":
+            return "уже запущен"
+        if inst["state"] == "deploying":
+            return "идёт развёртывание"
+    return None
+
+
+def _instances_bulk_redirect(*, message: str = "", error: str = "") -> RedirectResponse:
+    path = "/instances"
+    params: list[str] = []
+    if message:
+        params.append(f"message={quote(message)}")
+    if error:
+        params.append(f"error={quote(error)}")
+    if params:
+        path = f"{path}?{'&'.join(params)}"
+    return RedirectResponse(path, status_code=302)
 
 
 @app.get("/instances/new", response_class=HTMLResponse)
@@ -631,7 +628,8 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
     job_param = request.query_params.get("job", "")
     watch_job = _instance_watch_job(db, instance_id, job_param)
     current_task = _instance_current_task(db, instance_id)
-    watch_logs = _job_log_lines(db, watch_job["id"]) if watch_job else []
+    active_job = get_instance_active_job(db, instance_id)
+    watch_log_rows = _job_log_lines(db, watch_job["id"]) if watch_job else []
     return _render(
         request,
         "instance_detail.html",
@@ -641,8 +639,9 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
             "instance": inst,
             "jobs": jobs,
             "watch_job": watch_job,
-            "watch_logs": watch_logs,
+            "watch_log_rows": watch_log_rows,
             "current_task": current_task,
+            "active_job": active_job,
             "job_type_labels": JOB_TYPE_LABELS,
             "public_host": settings.policy.public_host,
             "message": message,
@@ -657,22 +656,29 @@ async def instance_rollback(
     instance_id: str,
     csrf_token: str = Form(""),
     db: Database = Depends(get_db),
-    settings=Depends(get_settings),
     user=Depends(current_user),
+    _worker=Depends(get_worker),
 ):
     require_role(user, "operator")
     verify_csrf(request, user, csrf_token)
     inst = get_instance(db, instance_id)
     if not inst or not inst.get("rollback_image_tag"):
         raise HTTPException(400, "nothing to rollback")
-    cid, ok = _launch_instance_container(db, settings, inst, inst["rollback_image_tag"])
-    with db.connection() as conn:
-        conn.execute(
-            "UPDATE instances SET state=?, container_id=?, image_tag=?, updated_at=? WHERE id=?",
-            ("running" if ok else "failed", cid, inst["rollback_image_tag"], utc_now(), instance_id),
-        )
-    write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="instance_rollback", target_type="instance", target_id=instance_id, ip=_client_ip(request), ok=ok)
-    return RedirectResponse(f"/instances/{instance_id}", status_code=302)
+    try:
+        jid = queue_job(db, instance_id, "instance_rollback", user["id"])
+    except ValueError as err:
+        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="instance_rollback",
+        target_type="job",
+        target_id=jid,
+        ip=_client_ip(request),
+    )
+    return RedirectResponse(f"/instances/{instance_id}?message=rollback+queued", status_code=302)
 
 
 @app.post("/instances/{instance_id}/build")
@@ -768,8 +774,9 @@ async def instance_job_logs_partial(
         raise HTTPException(404)
     if not get_instance_job(db, instance_id, job_id):
         raise HTTPException(404)
-    logs = _job_log_lines(db, job_id)
-    return _render(request, "partials/job_log_text.html", {"logs": logs})
+    after_id = int(request.query_params.get("after_id", "0") or "0")
+    log_rows = _job_log_lines(db, job_id, after_id=after_id)
+    return _render(request, "partials/job_log_lines.html", {"log_rows": log_rows})
 
 
 @app.get("/instances/{instance_id}/current-task", response_class=HTMLResponse)
@@ -808,7 +815,10 @@ async def instance_deploy(
         confirm = request.headers.get("X-Writable-Confirm")
         if confirm != "1" and not request.query_params.get("writable_ok"):
             pass
-    jid = queue_job(db, instance_id, "deploy", user["id"])
+    try:
+        jid = queue_job(db, instance_id, "deploy", user["id"])
+    except ValueError as err:
+        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
     write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="deploy_queue", target_type="job", target_id=jid, ip=_client_ip(request))
     return RedirectResponse(f"/instances/{instance_id}?message=deploy+queued", status_code=302)
 
@@ -820,8 +830,8 @@ async def instance_start(
     csrf_token: str = Form(""),
     return_to: str = Form(""),
     db: Database = Depends(get_db),
-    settings=Depends(get_settings),
     user=Depends(current_user),
+    _worker=Depends(get_worker),
 ):
     require_role(user, "operator")
     verify_csrf(request, user, csrf_token)
@@ -835,25 +845,22 @@ async def instance_start(
         raise HTTPException(400, "already running")
     if inst["state"] == "deploying":
         raise HTTPException(409, "instance is deploying")
-    cid, ok = _launch_instance_container(db, settings, inst, image)
-    with db.connection() as conn:
-        conn.execute(
-            "UPDATE instances SET state=?, container_id=?, updated_at=? WHERE id=?",
-            ("running" if ok else "failed", cid, utc_now(), instance_id),
-        )
+    try:
+        jid = queue_job(db, instance_id, "instance_start", user["id"])
+    except ValueError as err:
+        path = "/instances" if return_to == "instances" else f"/instances/{instance_id}"
+        return RedirectResponse(f"{path}?error={err}", status_code=302)
     write_audit(
         db,
         user_id=user["id"],
         username=user["username"],
         role=user["role"],
         action="instance_start",
-        target_type="instance",
-        target_id=instance_id,
+        target_type="job",
+        target_id=jid,
         ip=_client_ip(request),
-        ok=ok,
     )
-    msg = "instance+started" if ok else "instance+start+failed"
-    return _instance_action_redirect(instance_id, return_to, message=msg)
+    return _instance_action_redirect(instance_id, return_to, message="start+queued")
 
 
 @app.post("/instances/{instance_id}/stop")
@@ -864,20 +871,89 @@ async def instance_stop(
     return_to: str = Form(""),
     db: Database = Depends(get_db),
     user=Depends(current_user),
+    _worker=Depends(get_worker),
 ):
     require_role(user, "operator")
     verify_csrf(request, user, csrf_token)
     inst = get_instance(db, instance_id)
     if not inst:
         raise HTTPException(404)
-    DockerService().stop_remove(f"grapes-test-{inst['slug']}")
-    with db.connection() as conn:
-        conn.execute(
-            "UPDATE instances SET state='stopped', container_id='', updated_at=? WHERE id=?",
-            (utc_now(), instance_id),
+    try:
+        jid = queue_job(db, instance_id, "instance_stop", user["id"])
+    except ValueError as err:
+        path = "/instances" if return_to == "instances" else f"/instances/{instance_id}"
+        return RedirectResponse(f"{path}?error={err}", status_code=302)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="instance_stop",
+        target_type="job",
+        target_id=jid,
+        ip=_client_ip(request),
+    )
+    return _instance_action_redirect(instance_id, return_to, message="stop+queued")
+
+
+@app.post("/instances/bulk")
+async def instances_bulk_action(
+    request: Request,
+    action: str = Form(...),
+    instance_ids: list[str] = Form(default=[]),
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+    _worker=Depends(get_worker),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    job_type = _BULK_INSTANCE_ACTIONS.get(action)
+    if not job_type:
+        raise HTTPException(400, "unknown bulk action")
+    seen: set[str] = set()
+    queued = 0
+    skipped = 0
+    audit_action = {
+        "start": "instance_start",
+        "stop": "instance_stop",
+        "rebuild": "build_run_queue",
+    }[action]
+    for iid in instance_ids:
+        if iid in seen:
+            continue
+        seen.add(iid)
+        inst = get_instance(db, iid)
+        reason = _bulk_skip_reason(inst, action)
+        if reason:
+            skipped += 1
+            continue
+        try:
+            jid = queue_job(db, iid, job_type, user["id"])
+        except ValueError:
+            skipped += 1
+            continue
+        queued += 1
+        write_audit(
+            db,
+            user_id=user["id"],
+            username=user["username"],
+            role=user["role"],
+            action=audit_action,
+            target_type="job",
+            target_id=jid,
+            ip=_client_ip(request),
         )
-    write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="instance_stop", target_type="instance", target_id=instance_id, ip=_client_ip(request))
-    return _instance_action_redirect(instance_id, return_to, message="instance+stopped")
+    if not seen:
+        return _instances_bulk_redirect(error="Не выбрано ни одного инстанса")
+    parts: list[str] = []
+    if queued:
+        parts.append(f"В очередь: {queued}")
+    if skipped:
+        parts.append(f"пропущено: {skipped}")
+    if queued:
+        return _instances_bulk_redirect(message=", ".join(parts))
+    return _instances_bulk_redirect(error=", ".join(parts) if parts else "Ни один инстанс не поставлен в очередь")
 
 
 @app.post("/instances/{instance_id}/delete")
@@ -886,18 +962,16 @@ async def instance_delete(
     instance_id: str,
     csrf_token: str = Form(""),
     db: Database = Depends(get_db),
-    settings=Depends(get_settings),
     user=Depends(current_user),
+    _worker=Depends(get_worker),
 ):
     require_role(user, "operator")
     verify_csrf(request, user, csrf_token)
     inst = get_instance(db, instance_id)
     if not inst:
         raise HTTPException(404)
-    docker = DockerService()
-    docker.stop_remove(f"grapes-test-{inst['slug']}")
     try:
-        delete_instance(db, instance_id)
+        jid = queue_job(db, instance_id, "instance_delete", user["id"])
     except ValueError as err:
         return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
     write_audit(
@@ -906,11 +980,11 @@ async def instance_delete(
         username=user["username"],
         role=user["role"],
         action="instance_delete",
-        target_type="instance",
-        target_id=instance_id,
+        target_type="job",
+        target_id=jid,
         ip=_client_ip(request),
     )
-    return RedirectResponse("/instances?message=instance+deleted", status_code=302)
+    return RedirectResponse(f"/instances/{instance_id}?message=delete+queued", status_code=302)
 
 
 @app.get("/databases", response_class=HTMLResponse)
@@ -1165,22 +1239,23 @@ async def deployment_detail(request: Request, job_id: str, db: Database = Depend
         job = conn.execute("SELECT * FROM deployment_jobs WHERE id=?", (job_id,)).fetchone()
         if not job:
             raise HTTPException(404)
-        logs = [r["line"] for r in conn.execute(
-            "SELECT line FROM job_logs WHERE job_id=? ORDER BY id", (job_id,)
-        ).fetchall()]
-    return _render(request, "job_detail.html", {"user": user, "active": "deployments", "job": dict(job), "logs": logs})
+        log_rows = list_job_log_rows(db, job_id)
+    return _render(
+        request,
+        "job_detail.html",
+        {"user": user, "active": "deployments", "job": dict(job), "log_rows": log_rows},
+    )
 
 
 @app.get("/deployments/{job_id}/logs", response_class=HTMLResponse)
 async def deployment_logs_partial(request: Request, job_id: str, db: Database = Depends(get_db), user=Depends(current_user)):
     with db.connection() as conn:
         job = conn.execute("SELECT * FROM deployment_jobs WHERE id=?", (job_id,)).fetchone()
-        logs = [r["line"] for r in conn.execute(
-            "SELECT line FROM job_logs WHERE job_id=? ORDER BY id", (job_id,)
-        ).fetchall()]
     if not job:
         raise HTTPException(404)
-    return _render(request, "partials/job_log_text.html", {"logs": logs})
+    after_id = int(request.query_params.get("after_id", "0") or "0")
+    log_rows = list_job_log_rows(db, job_id, after_id=after_id)
+    return _render(request, "partials/job_log_lines.html", {"log_rows": log_rows})
 
 
 @app.get("/audit", response_class=HTMLResponse)

@@ -117,6 +117,68 @@
     }
   }
 
+  window.jobLogPollVals = function jobLogPollVals(target) {
+    const pre = target?.classList?.contains('job-log-pre')
+      ? target
+      : target?.closest?.('.job-log-pre');
+    if (!pre) return { after_id: 0 };
+    let afterId = 0;
+    pre.querySelectorAll('.job-log-line[data-log-id]').forEach((el) => {
+      const id = parseInt(el.dataset.logId, 10);
+      if (!Number.isNaN(id)) afterId = Math.max(afterId, id);
+    });
+    return { after_id: afterId };
+  };
+
+  document.body.addEventListener('htmx:responseError', (evt) => {
+    if (evt.detail.target?.id === 'instance-current-task' && evt.detail.xhr?.status === 404) {
+      window.location.href = '/instances?message=instance+deleted';
+    }
+  });
+
+  const bulkForm = document.getElementById('instances-bulk-form');
+  if (bulkForm) {
+    const actionInput = document.getElementById('instances-bulk-action');
+    const selectAll = document.getElementById('instances-select-all');
+    const rowChecks = () => document.querySelectorAll('.instances-row-check');
+    const bulkButtons = bulkForm.querySelectorAll('[data-instances-bulk]');
+
+    function syncBulkUi() {
+      const checks = rowChecks();
+      const checked = [...checks].filter((c) => c.checked);
+      bulkButtons.forEach((btn) => {
+        btn.disabled = checked.length === 0;
+      });
+      if (selectAll) {
+        selectAll.indeterminate = checked.length > 0 && checked.length < checks.length;
+        selectAll.checked = checks.length > 0 && checked.length === checks.length;
+      }
+    }
+
+    rowChecks().forEach((cb) => cb.addEventListener('change', syncBulkUi));
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        rowChecks().forEach((cb) => {
+          cb.checked = selectAll.checked;
+        });
+        syncBulkUi();
+      });
+    }
+    bulkButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.instancesBulk;
+        if (!action || !actionInput) return;
+        if (action === 'rebuild') {
+          const n = [...rowChecks()].filter((c) => c.checked).length;
+          if (!window.confirm(`Поставить в очередь пересборку (сборка и запуск) для ${n} инстанс(ов)?`)) return;
+        }
+        actionInput.value = action;
+        bulkForm.requestSubmit();
+      });
+    });
+    syncBulkUi();
+  }
+
   document.body.addEventListener('htmx:afterSwap', (evt) => {
     const target = evt.detail.target;
     if (target?.id !== 'instance-job-status') return;

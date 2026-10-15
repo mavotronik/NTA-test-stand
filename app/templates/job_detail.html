@@ -10,8 +10,9 @@
   <div class="card-body job-log-body">
     <pre class="job-log-pre"
          hx-get="/deployments/{{ job.id }}/logs"
-         hx-trigger="load, every 2s"
-         hx-swap="innerHTML">{% include "partials/job_log_text.html" %}</pre>
+         hx-trigger="load, every 2s [document.visibilityState=='visible']"
+         hx-swap="beforeend"
+         hx-vals="js:jobLogPollVals(event.target)">{% include "partials/job_log_lines.html" %}</pre>
   </div>
 </div>
 {% endblock %}

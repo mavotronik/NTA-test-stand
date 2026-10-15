@@ -1,15 +1,15 @@
-{% set logs = watch_logs %}
 <div class="card" id="instance-job-watch" style="margin-top:18px;" data-watch-job-id="{{ job.id }}" data-job-type="{{ job.job_type }}">
   <div id="instance-job-status"
        hx-get="/instances/{{ instance.id }}/jobs/{{ job.id }}/status"
-       hx-trigger="load, every 2s"
+       hx-trigger="load, every 2s [document.visibilityState=='visible']"
        hx-swap="innerHTML">
     {% include "partials/instance_job_status.html" %}
   </div>
   <div class="card-body job-log-body">
     <pre class="job-log-pre"
          hx-get="/instances/{{ instance.id }}/jobs/{{ job.id }}/logs"
-         hx-trigger="load, every 2s"
-         hx-swap="innerHTML">{% include "partials/job_log_text.html" %}</pre>
+         hx-trigger="load, every 2s [document.visibilityState=='visible']"
+         hx-swap="beforeend"
+         hx-vals="js:jobLogPollVals(event.target)">{% with log_rows=watch_log_rows %}{% include "partials/job_log_lines.html" %}{% endwith %}</pre>
   </div>
 </div>

@@ -1,2 +1,2 @@
-{% for line in logs %}{{ line }}
-{% endfor %}
+{% if log_rows is defined %}{% include "partials/job_log_lines.html" %}{% else %}{% for line in logs %}<span class="job-log-line">{{ line }}
+</span>{% endfor %}{% endif %}

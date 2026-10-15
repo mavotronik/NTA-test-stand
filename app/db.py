@@ -157,39 +157,41 @@ def new_id() -> str:
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._lock = threading.RLock()
+        self._schema_lock = threading.Lock()
         path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            conn = self._connect()
-            try:
-                yield conn
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
+        conn = self._connect()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_schema(self) -> None:
-        with self.connection() as conn:
-            conn.executescript(MIGRATION_SQL)
-            row = conn.execute(
-                "SELECT value FROM schema_meta WHERE key='version'"
-            ).fetchone()
-            if not row:
-                conn.execute(
-                    "INSERT INTO schema_meta(key,value) VALUES('version',?)",
-                    (str(SCHEMA_VERSION),),
-                )
+        with self._schema_lock:
+            with self.connection() as conn:
+                conn.executescript(MIGRATION_SQL)
+                row = conn.execute(
+                    "SELECT value FROM schema_meta WHERE key='version'"
+                ).fetchone()
+                if not row:
+                    conn.execute(
+                        "INSERT INTO schema_meta(key,value) VALUES('version',?)",
+                        (str(SCHEMA_VERSION),),
+                    )
+
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:

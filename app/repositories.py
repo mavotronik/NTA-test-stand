@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from app.db import Database, new_id, utc_now
+from app.services.job_queue import BUILD_DEPLOY_JOB_TYPES, LIFECYCLE_JOB_TYPES
 
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
@@ -249,7 +250,7 @@ def update_profile_check(db: Database, profile_id: str, ok: bool, msg: str) -> N
         )
 
 
-INSTANCE_ACTIVE_JOB_TYPES = ("deploy", "build", "build_run")
+INSTANCE_ACTIVE_JOB_TYPES = BUILD_DEPLOY_JOB_TYPES + LIFECYCLE_JOB_TYPES
 
 
 def get_instance_job(db: Database, instance_id: str, job_id: str) -> dict[str, Any] | None:
@@ -428,19 +429,54 @@ def find_build_retry_instance(db: Database, build_id: str) -> str | None:
     return None
 
 
-def delete_instance(db: Database, instance_id: str) -> None:
+def delete_instance(
+    db: Database,
+    instance_id: str,
+    *,
+    completing_job_id: str | None = None,
+) -> None:
     with db.connection() as conn:
-        active = conn.execute(
-            """
-            SELECT 1 FROM deployment_jobs
-            WHERE instance_id=? AND status IN ('queued', 'running')
-            LIMIT 1
-            """,
-            (instance_id,),
-        ).fetchone()
+        if completing_job_id:
+            active = conn.execute(
+                """
+                SELECT 1 FROM deployment_jobs
+                WHERE instance_id=? AND status IN ('queued', 'running') AND id<>?
+                LIMIT 1
+                """,
+                (instance_id, completing_job_id),
+            ).fetchone()
+        else:
+            active = conn.execute(
+                """
+                SELECT 1 FROM deployment_jobs
+                WHERE instance_id=? AND status IN ('queued', 'running')
+                LIMIT 1
+                """,
+                (instance_id,),
+            ).fetchone()
         if active:
             raise ValueError("instance has active jobs")
         conn.execute("DELETE FROM instances WHERE id=?", (instance_id,))
+
+
+def list_job_log_rows(
+    db: Database,
+    job_id: str,
+    *,
+    after_id: int = 0,
+) -> list[dict[str, Any]]:
+    with db.connection() as conn:
+        if after_id > 0:
+            rows = conn.execute(
+                "SELECT id, line FROM job_logs WHERE job_id=? AND id>? ORDER BY id",
+                (job_id, after_id),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, line FROM job_logs WHERE job_id=? ORDER BY id",
+                (job_id,),
+            ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def delete_db_profile(db: Database, profile_id: str) -> None:

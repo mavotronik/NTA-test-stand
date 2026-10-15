@@ -8,12 +8,27 @@
 {% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
 {% if error %}<p style="color:var(--danger);">{{ error }}</p>{% endif %}
 <div class="card">
+  {% if user.role in ('admin', 'operator') %}
+  <form id="instances-bulk-form" method="post" action="/instances/bulk" class="instances-bulk-bar">
+    <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+    <input type="hidden" name="action" id="instances-bulk-action" value="">
+    <span class="instances-bulk-label">С выбранными:</span>
+    <button class="button success" type="button" data-instances-bulk="start" disabled><span class="mdi mdi-play"></span> Запустить</button>
+    <button class="button danger" type="button" data-instances-bulk="stop" disabled><span class="mdi mdi-stop"></span> Остановить</button>
+    <button class="button primary" type="button" data-instances-bulk="rebuild" disabled><span class="mdi mdi-sync"></span> Пересобрать</button>
+  </form>
+  {% endif %}
   <div class="table-wrapper">
     <table>
-      <thead><tr><th>Имя</th><th>Slug</th><th>Состояние</th><th>URL</th><th>БД</th><th>Ветка</th><th></th></tr></thead>
+      <thead><tr>
+        {% if user.role in ('admin', 'operator') %}<th class="instances-col-check"><input type="checkbox" id="instances-select-all" title="Выбрать все" aria-label="Выбрать все"></th>{% endif %}
+        <th>Имя</th><th>Slug</th><th>Состояние</th><th>URL</th><th>БД</th><th>Ветка</th><th></th></tr></thead>
       <tbody>
       {% for i in instances %}
       <tr>
+        {% if user.role in ('admin', 'operator') %}
+        <td class="instances-col-check"><input type="checkbox" form="instances-bulk-form" class="instances-row-check" name="instance_ids" value="{{ i.id }}" aria-label="Выбрать {{ i.name }}"></td>
+        {% endif %}
         <td>{{ i.name }}</td>
         <td>{{ i.slug }}</td>
         <td>{{ i.state }}</td>
@@ -42,7 +57,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7">Пока нет инстансов</td></tr>
+      <tr><td colspan="{% if user.role in ('admin', 'operator') %}8{% else %}7{% endif %}">Пока нет инстансов</td></tr>
       {% endfor %}
       </tbody>
     </table>
