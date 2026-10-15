@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -46,13 +47,15 @@ from app.repositories import (
     list_db_profiles,
     list_instances,
     list_jobs,
+    list_occupied_ports,
     list_ready_build_images,
     list_users,
     get_user,
     set_user_password,
     count_active_admins,
     delete_user,
-    port_taken,
+    next_free_port,
+    port_owner,
     queue_job,
     save_db_profile,
     update_instance,
@@ -262,7 +265,15 @@ def _instance_form_ctx(
 ) -> dict:
     repo = Path(settings.policy.git_remote_url)
     branches = git_service.list_branches(repo, settings.policy) or ["main"]
-    base_form = {}
+    exclude_id = instance["id"] if instance else None
+    occupied = list_occupied_ports(db, exclude_id=exclude_id)
+    suggested = next_free_port(
+        db,
+        settings.policy.port_min,
+        settings.policy.port_max,
+        exclude_id=exclude_id,
+    )
+    base_form: dict[str, Any] = {}
     if instance:
         base_form = {
             "name": instance["name"],
@@ -272,6 +283,8 @@ def _instance_form_ctx(
             "git_commit": instance.get("git_commit") or "",
             "image_tag": instance.get("image_tag") or "",
         }
+    elif suggested is not None:
+        base_form["port"] = suggested
     if form:
         base_form.update(form)
     return {
@@ -279,10 +292,22 @@ def _instance_form_ctx(
         "branches": branches,
         "port_min": settings.policy.port_min,
         "port_max": settings.policy.port_max,
+        "suggested_port": suggested,
+        "occupied_ports_json": json.dumps(
+            [
+                {"port": int(row["port"]), "name": row["name"], "slug": row["slug"]}
+                for row in occupied
+            ],
+            ensure_ascii=False,
+        ),
         "ready_images": list_ready_build_images(db),
         "form": base_form,
         "instance": instance,
     }
+
+
+def _port_conflict_message(owner: dict[str, Any], port: int) -> str:
+    return f"Порт {port} уже занят инстансом «{owner['name']}»"
 
 
 @app.get("/instances/new", response_class=HTMLResponse)
@@ -304,6 +329,8 @@ async def instance_new_post(
     port: int = Form(...),
     db_profile_id: str = Form(...),
     git_branch: str = Form(...),
+    git_commit: str = Form(""),
+    image_tag: str = Form(""),
     csrf_token: str = Form(""),
     db: Database = Depends(get_db),
     settings=Depends(get_settings),
@@ -316,8 +343,32 @@ async def instance_new_post(
         raise HTTPException(400, "invalid slug")
     if port < settings.policy.port_min or port > settings.policy.port_max:
         raise HTTPException(400, "port out of range")
-    if port_taken(db, port):
-        raise HTTPException(409, "port taken")
+    owner = port_owner(db, port)
+    if owner:
+        ctx = _instance_form_ctx(
+            db,
+            settings,
+            form={
+                "name": name.strip(),
+                "slug": slug,
+                "port": port,
+                "db_profile_id": db_profile_id,
+                "git_branch": git_branch.strip(),
+                "git_commit": git_commit,
+                "image_tag": image_tag,
+            },
+        )
+        return _render(
+            request,
+            "instance_form.html",
+            {
+                **ctx,
+                "user": user,
+                "active": "instances",
+                "port_error": _port_conflict_message(owner, port),
+            },
+            status=409,
+        )
     if not branch_allowed(settings.policy, git_branch):
         raise HTTPException(400, "branch not allowed")
     prof = get_db_profile(db, db_profile_id)
@@ -387,8 +438,32 @@ async def instance_edit_post(
         raise HTTPException(404)
     if port < settings.policy.port_min or port > settings.policy.port_max:
         raise HTTPException(400, "port out of range")
-    if port_taken(db, port, exclude_id=instance_id):
-        raise HTTPException(409, "port taken")
+    owner = port_owner(db, port, exclude_id=instance_id)
+    if owner:
+        ctx = _instance_form_ctx(
+            db,
+            settings,
+            instance=inst,
+            form={
+                "name": name.strip(),
+                "port": port,
+                "db_profile_id": db_profile_id,
+                "git_branch": git_branch.strip(),
+                "git_commit": git_commit,
+                "image_tag": image_tag,
+            },
+        )
+        return _render(
+            request,
+            "instance_form.html",
+            {
+                **ctx,
+                "user": user,
+                "active": "instances",
+                "port_error": _port_conflict_message(owner, port),
+            },
+            status=409,
+        )
     if not branch_allowed(settings.policy, git_branch):
         raise HTTPException(400, "branch not allowed")
     prof = get_db_profile(db, db_profile_id)

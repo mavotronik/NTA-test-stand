@@ -1,8 +1,10 @@
+import html
 import os
 import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 from fastapi.testclient import TestClient
@@ -129,6 +131,121 @@ class HttpTests(unittest.TestCase):
                 follow_redirects=False,
             )
             self.assertEqual(r_del.status_code, 302)
+
+    def test_instance_port_autofill_and_conflict(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        csrf = self._admin_csrf()
+        from app.db import Database
+        from app.repositories import create_instance, list_users, save_db_profile
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="port-autofill",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        with mock.patch("app.main.git_service.list_branches", return_value=["main"]):
+            empty = self.client.get("/instances/new")
+            self.assertEqual(empty.status_code, 200)
+            self.assertIn('id="instance-port"', empty.text)
+            self.assertIn('value="3100"', empty.text)
+            self.assertIn("Подставлен первый свободный порт", empty.text)
+
+            first_id = create_instance(
+                db,
+                slug="port-a",
+                name="Порт A",
+                port=3100,
+                db_profile_id=profile_id,
+                git_branch="main",
+                user_id=admin_id,
+            )
+            create_instance(
+                db,
+                slug="port-c",
+                name="Порт C",
+                port=3102,
+                db_profile_id=profile_id,
+                git_branch="main",
+                user_id=admin_id,
+            )
+            suggested = self.client.get("/instances/new")
+            self.assertEqual(suggested.status_code, 200)
+            self.assertIn('value="3101"', suggested.text)
+            self.assertIn("Порт A", suggested.text)
+            self.assertIn("Порт C", suggested.text)
+
+            conflict = self.client.post(
+                "/instances/new",
+                data={
+                    "csrf_token": csrf,
+                    "name": "Новый",
+                    "slug": "port-b",
+                    "port": "3100",
+                    "db_profile_id": profile_id,
+                    "git_branch": "main",
+                    "git_commit": "abc",
+                    "image_tag": "img:1",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(conflict.status_code, 409)
+            self.assertEqual(self._port_input_class(conflict.text), "input input-invalid")
+            self.assertIn("уже занят инстансом «Порт A»", conflict.text)
+            self.assertIn('value="3100"', conflict.text)
+            self.assertIn('value="abc"', conflict.text)
+
+            created = self.client.post(
+                "/instances/new",
+                data={
+                    "csrf_token": csrf,
+                    "name": "Новый",
+                    "slug": "port-b",
+                    "port": "3101",
+                    "db_profile_id": profile_id,
+                    "git_branch": "main",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(created.status_code, 302)
+
+            edit = self.client.get(f"/instances/{first_id}/edit")
+            self.assertEqual(edit.status_code, 200)
+            self.assertIn('value="3100"', edit.text)
+            self.assertEqual(self._port_input_class(edit.text), "input")
+            occupied = html.unescape(edit.text)
+            self.assertNotIn('"slug": "port-a"', occupied)
+            self.assertIn('"slug": "port-b"', occupied)
+
+            edit_conflict = self.client.post(
+                f"/instances/{first_id}/edit",
+                data={
+                    "csrf_token": csrf,
+                    "name": "Порт A",
+                    "port": "3101",
+                    "db_profile_id": profile_id,
+                    "git_branch": "main",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(edit_conflict.status_code, 409)
+            self.assertEqual(self._port_input_class(edit_conflict.text), "input input-invalid")
+            self.assertIn("уже занят инстансом «Новый»", edit_conflict.text)
+
+    def _port_input_class(self, html: str) -> str:
+        match = re.search(r'<input class="([^"]*)" id="instance-port"', html)
+        self.assertIsNotNone(match)
+        return match.group(1)
 
 
 if __name__ == "__main__":

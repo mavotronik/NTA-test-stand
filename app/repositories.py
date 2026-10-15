@@ -40,15 +40,50 @@ def get_instance(db: Database, instance_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def port_taken(db: Database, port: int, exclude_id: str | None = None) -> bool:
+def port_owner(db: Database, port: int, exclude_id: str | None = None) -> dict[str, Any] | None:
     with db.connection() as conn:
         if exclude_id:
             row = conn.execute(
-                "SELECT 1 FROM instances WHERE port=? AND id<>?", (port, exclude_id)
+                "SELECT id, name, slug, port FROM instances WHERE port=? AND id<>?",
+                (port, exclude_id),
             ).fetchone()
         else:
-            row = conn.execute("SELECT 1 FROM instances WHERE port=?", (port,)).fetchone()
-    return row is not None
+            row = conn.execute(
+                "SELECT id, name, slug, port FROM instances WHERE port=?",
+                (port,),
+            ).fetchone()
+    return dict(row) if row else None
+
+
+def port_taken(db: Database, port: int, exclude_id: str | None = None) -> bool:
+    return port_owner(db, port, exclude_id=exclude_id) is not None
+
+
+def list_occupied_ports(db: Database, exclude_id: str | None = None) -> list[dict[str, Any]]:
+    with db.connection() as conn:
+        if exclude_id:
+            rows = conn.execute(
+                "SELECT port, name, slug FROM instances WHERE id<>? ORDER BY port",
+                (exclude_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT port, name, slug FROM instances ORDER BY port"
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def next_free_port(
+    db: Database,
+    port_min: int,
+    port_max: int,
+    exclude_id: str | None = None,
+) -> int | None:
+    taken = {int(row["port"]) for row in list_occupied_ports(db, exclude_id)}
+    for port in range(port_min, port_max + 1):
+        if port not in taken:
+            return port
+    return None
 
 
 def create_instance(

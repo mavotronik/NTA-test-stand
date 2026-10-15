@@ -16,7 +16,20 @@
         <input class="input" name="slug" required pattern="[a-z0-9][a-z0-9-]{1,62}" value="{{ form.slug or '' }}">
         {% endif %}
       </div>
-      <div class="form-group"><label class="form-label">Порт</label><input class="input" type="number" name="port" required min="{{ port_min }}" max="{{ port_max }}" value="{{ form.port or port_min }}"></div>
+      <div class="form-group">
+        <label class="form-label" for="instance-port">Порт</label>
+        <input class="input{% if port_error %} input-invalid{% endif %}" id="instance-port" type="number" name="port" required min="{{ port_min }}" max="{{ port_max }}" {% if form.port is defined and form.port is not none %}value="{{ form.port }}"{% endif %} data-occupied="{{ occupied_ports_json }}" autocomplete="off" {% if port_error %}aria-invalid="true"{% endif %}>
+        {% if not instance %}
+          {% if suggested_port is not none %}
+          <p class="field-hint">Подставлен первый свободный порт в диапазоне {{ port_min }}–{{ port_max }}.</p>
+          {% else %}
+          <p class="field-error">В диапазоне {{ port_min }}–{{ port_max }} нет свободных портов.</p>
+          {% endif %}
+        {% else %}
+        <p class="field-hint">Диапазон {{ port_min }}–{{ port_max }}. Порт, занятый другим инстансом, будет подсвечен.</p>
+        {% endif %}
+        <p class="field-error" id="instance-port-error" {% if not port_error %}hidden{% endif %}>{{ port_error or '' }}</p>
+      </div>
       <div class="form-group"><label class="form-label">Профиль БД</label>
         <select class="select" name="db_profile_id" required>
           {% for p in profiles %}
@@ -51,4 +64,45 @@
     </form>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const input = document.getElementById('instance-port');
+  const hint = document.getElementById('instance-port-error');
+  if (!input || !hint) return;
+  let occupied = [];
+  try {
+    occupied = JSON.parse(input.dataset.occupied || '[]');
+  } catch (err) {
+    occupied = [];
+  }
+  const byPort = new Map(occupied.map((row) => [Number(row.port), row]));
+  function conflictMessage() {
+    const raw = input.value.trim();
+    if (!raw) return '';
+    const value = Number(raw);
+    if (!Number.isInteger(value)) return '';
+    const hit = byPort.get(value);
+    if (!hit) return '';
+    return 'Порт ' + value + ' уже занят инстансом «' + hit.name + '»';
+  }
+  function showConflict() {
+    const message = conflictMessage();
+    input.classList.toggle('input-invalid', Boolean(message));
+    if (message) input.setAttribute('aria-invalid', 'true');
+    else input.removeAttribute('aria-invalid');
+    hint.hidden = !message;
+    hint.textContent = message;
+    return !message;
+  }
+  input.addEventListener('input', showConflict);
+  if (input.form) {
+    input.form.addEventListener('submit', (event) => {
+      if (!showConflict()) event.preventDefault();
+    });
+  }
+  showConflict();
+})();
+</script>
 {% endblock %}
