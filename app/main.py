@@ -104,6 +104,7 @@ AUDIT_ACTION_LABELS: dict[str, str] = {
     "instance_create": "Создание инстанса",
     "instance_update": "Изменение инстанса",
     "instance_stop": "Остановка инстанса",
+    "instance_start": "Запуск инстанса",
     "instance_delete": "Удаление инстанса",
     "instance_rollback": "Откат образа",
     "build_queue": "Постановка сборки в очередь",
@@ -124,6 +125,7 @@ AUDIT_ACTION_ICONS: dict[str, str] = {
     "instance_create": "mdi-server-plus",
     "instance_update": "mdi-pencil",
     "instance_stop": "mdi-stop",
+    "instance_start": "mdi-play",
     "instance_delete": "mdi-delete",
     "instance_rollback": "mdi-backup-restore",
     "build_queue": "mdi-docker",
@@ -249,10 +251,19 @@ async def overview(
 
 @app.get("/instances", response_class=HTMLResponse)
 async def instances_page(request: Request, db: Database = Depends(get_db), settings=Depends(get_settings), user=Depends(current_user)):
+    message = request.query_params.get("message", "").replace("+", " ")
+    error = request.query_params.get("error", "").replace("+", " ")
     return _render(
         request,
         "instances.html",
-        {"user": user, "active": "instances", "instances": list_instances(db), "public_host": settings.policy.public_host},
+        {
+            "user": user,
+            "active": "instances",
+            "instances": list_instances(db),
+            "public_host": settings.policy.public_host,
+            "message": message,
+            "error": error,
+        },
     )
 
 
@@ -308,6 +319,46 @@ def _instance_form_ctx(
 
 def _port_conflict_message(owner: dict[str, Any], port: int) -> str:
     return f"Порт {port} уже занят инстансом «{owner['name']}»"
+
+
+def _instance_action_redirect(instance_id: str, return_to: str, *, message: str = "") -> RedirectResponse:
+    path = "/instances" if return_to == "instances" else f"/instances/{instance_id}"
+    if message:
+        path = f"{path}?message={message}"
+    return RedirectResponse(path, status_code=302)
+
+
+def _launch_instance_container(db: Database, settings, inst: dict[str, Any], image: str) -> tuple[str, bool]:
+    from app.crypto_util import decrypt_secret
+
+    prof = get_db_profile(db, inst["db_profile_id"], include_secret=True)
+    if not prof:
+        raise HTTPException(400, "profile missing")
+    fernet = get_fernet(settings.fernet_key, settings.secret_key)
+    pwd = decrypt_secret(fernet, prof["password_enc"])
+    env = {
+        "CLICKHOUSE_URL": f"{'https' if prof['tls'] else 'http'}://{prof['host']}:{prof['port']}",
+        "CLICKHOUSE_USER": prof["username"],
+        "CLICKHOUSE_PASSWORD": pwd,
+        "CLICKHOUSE_DATABASE": prof["database_name"],
+        "SESSION_COOKIE_SECURE": "false",
+    }
+    name = f"grapes-test-{inst['slug']}"
+    data_dir = settings.instance_ui_data_dir(inst["slug"])
+    docker = DockerService()
+    cid = docker.run_instance_container(
+        name=name,
+        image=image,
+        port=int(inst["port"]),
+        env=env,
+        data_mount_host=data_dir,
+    )
+    ok = docker.wait_health_http(
+        int(inst["port"]),
+        settings.policy.health_timeout_sec,
+        settings.policy.health_interval_sec,
+    )
+    return cid, ok
 
 
 @app.get("/instances/new", response_class=HTMLResponse)
@@ -563,31 +614,7 @@ async def instance_rollback(
     inst = get_instance(db, instance_id)
     if not inst or not inst.get("rollback_image_tag"):
         raise HTTPException(400, "nothing to rollback")
-    name = f"grapes-test-{inst['slug']}"
-    docker = DockerService()
-    data_dir = settings.instance_ui_data_dir(inst["slug"])
-    prof = get_db_profile(db, inst["db_profile_id"], include_secret=True)
-    if not prof:
-        raise HTTPException(400, "profile missing")
-    fernet = get_fernet(settings.fernet_key, settings.secret_key)
-    from app.crypto_util import decrypt_secret
-
-    pwd = decrypt_secret(fernet, prof["password_enc"])
-    env = {
-        "CLICKHOUSE_URL": f"{'https' if prof['tls'] else 'http'}://{prof['host']}:{prof['port']}",
-        "CLICKHOUSE_USER": prof["username"],
-        "CLICKHOUSE_PASSWORD": pwd,
-        "CLICKHOUSE_DATABASE": prof["database_name"],
-        "SESSION_COOKIE_SECURE": "false",
-    }
-    cid = docker.run_instance_container(
-        name=name,
-        image=inst["rollback_image_tag"],
-        port=int(inst["port"]),
-        env=env,
-        data_mount_host=data_dir,
-    )
-    ok = docker.wait_health_http(int(inst["port"]), settings.policy.health_timeout_sec, settings.policy.health_interval_sec)
+    cid, ok = _launch_instance_container(db, settings, inst, inst["rollback_image_tag"])
     with db.connection() as conn:
         conn.execute(
             "UPDATE instances SET state=?, container_id=?, image_tag=?, updated_at=? WHERE id=?",
@@ -640,11 +667,55 @@ async def instance_deploy(
     return RedirectResponse(f"/instances/{instance_id}?message=deploy+queued", status_code=302)
 
 
+@app.post("/instances/{instance_id}/start")
+async def instance_start(
+    request: Request,
+    instance_id: str,
+    csrf_token: str = Form(""),
+    return_to: str = Form(""),
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    image = (inst.get("image_tag") or "").strip()
+    if not image:
+        raise HTTPException(400, "no image on instance")
+    if inst["state"] == "running":
+        raise HTTPException(400, "already running")
+    if inst["state"] == "deploying":
+        raise HTTPException(409, "instance is deploying")
+    cid, ok = _launch_instance_container(db, settings, inst, image)
+    with db.connection() as conn:
+        conn.execute(
+            "UPDATE instances SET state=?, container_id=?, updated_at=? WHERE id=?",
+            ("running" if ok else "failed", cid, utc_now(), instance_id),
+        )
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="instance_start",
+        target_type="instance",
+        target_id=instance_id,
+        ip=_client_ip(request),
+        ok=ok,
+    )
+    msg = "instance+started" if ok else "instance+start+failed"
+    return _instance_action_redirect(instance_id, return_to, message=msg)
+
+
 @app.post("/instances/{instance_id}/stop")
 async def instance_stop(
     request: Request,
     instance_id: str,
     csrf_token: str = Form(""),
+    return_to: str = Form(""),
     db: Database = Depends(get_db),
     user=Depends(current_user),
 ):
@@ -660,7 +731,7 @@ async def instance_stop(
             (utc_now(), instance_id),
         )
     write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="instance_stop", target_type="instance", target_id=instance_id, ip=_client_ip(request))
-    return RedirectResponse(f"/instances/{instance_id}", status_code=302)
+    return _instance_action_redirect(instance_id, return_to, message="instance+stopped")
 
 
 @app.post("/instances/{instance_id}/delete")

@@ -22,8 +22,22 @@
         <td>{{ i.git_branch }}</td>
         <td>
           <a class="button" href="/instances/{{ i.id }}"><span class="mdi mdi-eye-outline"></span> Детали</a>
+          <a class="button" href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
           {% if user.role in ('admin', 'operator') %}
           <a class="button" href="/instances/{{ i.id }}/edit"><span class="mdi mdi-pencil"></span> Изменить</a>
+          {% if i.state == 'running' %}
+          <form method="post" action="/instances/{{ i.id }}/stop" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+            <input type="hidden" name="return_to" value="instances">
+            <button class="button danger" type="submit"><span class="mdi mdi-stop"></span> Остановить</button>
+          </form>
+          {% else %}
+          <form method="post" action="/instances/{{ i.id }}/start" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+            <input type="hidden" name="return_to" value="instances">
+            <button class="button success" type="submit"{% if i.state == 'deploying' or not i.image_tag %} disabled title="{% if i.state == 'deploying' %}Идёт развёртывание{% else %}Нет образа для запуска{% endif %}"{% endif %}><span class="mdi mdi-play"></span> Запустить</button>
+          </form>
+          {% endif %}
           {% endif %}
         </td>
       </tr>

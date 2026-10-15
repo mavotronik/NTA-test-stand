@@ -407,6 +407,25 @@
             color: white;
         }
 
+        .button.danger:hover {
+            filter: brightness(0.92);
+        }
+
+        .button.success {
+            border-color: var(--success);
+            background: var(--success);
+            color: white;
+        }
+
+        .button.success:hover {
+            filter: brightness(0.92);
+        }
+
+        .button:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
         .button > .mdi {
             font-size: 18px;
             line-height: 1;

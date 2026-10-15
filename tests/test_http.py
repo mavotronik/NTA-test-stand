@@ -247,6 +247,57 @@ class HttpTests(unittest.TestCase):
         self.assertIsNotNone(match)
         return match.group(1)
 
+    def test_instances_start_stop_buttons(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        from app.db import Database
+        from app.repositories import create_instance, list_users, save_db_profile
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="btn-profile",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        iid = create_instance(
+            db,
+            slug="btn-test",
+            name="Кнопки",
+            port=3200,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+        )
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE instances SET state='stopped', image_tag='demo:latest' WHERE id=?",
+                (iid,),
+            )
+        stopped = self.client.get("/instances")
+        self.assertEqual(stopped.status_code, 200)
+        self.assertIn("mdi-play", stopped.text)
+        self.assertIn("Запустить", stopped.text)
+        self.assertIn("button success", stopped.text)
+        self.assertNotIn("mdi-stop", stopped.text)
+
+        with db.connection() as conn:
+            conn.execute("UPDATE instances SET state='running' WHERE id=?", (iid,))
+        running = self.client.get("/instances")
+        self.assertEqual(running.status_code, 200)
+        self.assertIn("mdi-stop", running.text)
+        self.assertIn("Остановить", running.text)
+        self.assertIn("button danger", running.text)
+        self.assertNotIn("mdi-play", running.text)
+
 
 if __name__ == "__main__":
     unittest.main()
