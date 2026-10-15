@@ -10,8 +10,7 @@ manager:
   host_proc: /host/proc
   session_ttl_hours: 24
   secret_key: change-me-in-production
-  # Опционально; если пусто —# Данные UI-инстансов на хосте → bind /app/server/data (как UI_DATA_DIR в deploy/ui).
-# В Compose: /data/root. Локально: ./data/root. производный ключ из secret_key
+  # Опционально; если пусто — производный ключ из secret_key
   fernet_key: ""
   bootstrap_admin_user: admin
   bootstrap_admin_password: "very_strong_and_secure_password-(not)"
@@ -30,7 +29,9 @@ ports:
   min: 3100
   max: 3199
 
-storage_root: /data/root
+# Данные UI-инстансов на хосте → bind /app/server/data (как UI_DATA_DIR в deploy/ui).
+# В Compose: /data/root. Локально: ./data/root.
+storage_root: ./data/root
 
 public_host: 127.0.0.1
 

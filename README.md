@@ -1,17 +1,17 @@
-# Test Stand Manager
+# NTA Test Stand Manager
 
-Внутренняя панель для нескольких GrapesNTA UI-инстансов: Git-ветки, Docker-сборки, профили ClickHouse, мониторинг хоста (CPU/RAM/Disk/LA) в реальном времени.
+Панель для нескольких GrapesNTA UI-инстансов на dev/test-стенде: Git-ветки и commit, Docker-сборки из репозитория [GrapesNTA](https://github.com/jzhekatroy/GrapesNTA), профили ClickHouse, мониторинг хоста (CPU/RAM/Disk/LA).
 
-Конфигурация — один файл **`config.yaml`** (секция `manager` + политики стенда).
+Конфигурация — **`config.yaml`** (секция `manager` + политики стенда).
 
 ## Быстрый старт (локально)
 
 ```bash
-cd test-stand/control-panel
+cd ~/work/NTA-test-stand
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp config.example.yaml config.yaml
-# отредактируйте config.yaml: manager.bootstrap_admin_password, git.remote_url, storage_root
+# git.remote_url — путь к checkout GrapesNTA; manager.bootstrap_admin_password, storage_root
 python -m app
 ```
 
@@ -19,22 +19,23 @@ python -m app
 
 Откройте UI на порту из `manager.port` — логин `admin`, пароль из `manager.bootstrap_admin_password`.
 
-Путь к конфигу можно переопределить: `CONFIG_FILE=/path/to/config.yaml`.
+`CONFIG_FILE=/path/to/config.yaml` переопределяет путь к конфигу.
 
 ## Docker
 
 ```bash
 cp config.example.yaml config.yaml
-# для контейнера: manager.host: 0.0.0.0, manager.data_dir: /data, manager.host_proc: /host/proc
+# manager.host: 0.0.0.0, manager.data_dir: /data, manager.host_proc: /host/proc
+# GIT_REPO_HOST_PATH — mount GrapesNTA на хосте
 docker compose up -d --build
 ```
 
-Нужны Docker socket и mount `/proc:/host/proc:ro` для метрик хоста.
+Нужны Docker socket и `/proc:/host/proc:ro` для метрик хоста.
 
 ## Тесты
 
 ```bash
-python3 -m unittest discover -s tests -v
+PYTHONPATH=. python -m unittest discover -s tests -v
 ```
 
-См. [docs/TEST_STAND_CONTROL_PANEL.md](../../docs/TEST_STAND_CONTROL_PANEL.md).
+Подробнее: [docs/TEST_STAND_CONTROL_PANEL.md](docs/TEST_STAND_CONTROL_PANEL.md).
