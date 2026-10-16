@@ -1355,6 +1355,7 @@
         .modal-body-log .job-log-pre {
             max-height: none;
             height: 100%;
+            min-height: 240px;
             background: color-mix(in srgb, var(--surface-hover) 50%, transparent);
         }
 

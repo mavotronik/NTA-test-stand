@@ -16,7 +16,7 @@
            hx-get="/deployments/{{ job.id }}/logs"
            hx-trigger="load, every 2s [document.visibilityState=='visible']"
            hx-swap="beforeend"
-           hx-vals="js:jobLogPollVals(event.target)">{% include "partials/job_log_lines.html" %}</pre>
+           hx-vals="js:{after_id: jobLogPollVals().after_id}">{% include "partials/job_log_lines.html" %}</pre>
     </div>
   </div>
 </div>

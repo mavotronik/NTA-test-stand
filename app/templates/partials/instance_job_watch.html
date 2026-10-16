@@ -1,21 +1,21 @@
-<div class="modal-overlay visible job-log-shell" id="instance-job-watch" data-watch-job-id="{{ job.id }}" data-job-type="{{ job.job_type }}" aria-hidden="false">
-  <div class="modal modal-log job-log-shell" role="dialog" aria-modal="true" data-tone="primary">
-    <div class="modal-header">
-      <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-text-box-outline"></span></div>
-      <div id="instance-job-status"
-           hx-get="/instances/{{ instance.id }}/jobs/{{ job.id }}/status"
-           hx-trigger="load, every 2s [document.visibilityState=='visible']"
-           hx-swap="innerHTML">
-        {% include "partials/instance_job_status.html" %}
-      </div>
-      <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+<div class="modal modal-log js-log-modal-dialog job-log-shell" id="instance-job-watch" role="dialog" aria-modal="true" data-tone="primary" data-watch-job-id="{{ job.id }}" data-job-type="{{ job.job_type }}">
+  <div class="modal-header">
+    <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-text-box-outline"></span></div>
+    <div id="instance-job-status"
+         hx-get="/instances/{{ instance.id }}/jobs/{{ job.id }}/status"
+         hx-trigger="load, every 2s [document.visibilityState=='visible']"
+         hx-swap="innerHTML">
+      {% include "partials/instance_job_status.html" %}
     </div>
-    <div class="modal-body modal-body-log">
-      <pre class="job-log-pre"
-           hx-get="/instances/{{ instance.id }}/jobs/{{ job.id }}/logs"
-           hx-trigger="load, every 2s [document.visibilityState=='visible']"
-           hx-swap="beforeend"
-           hx-vals="js:jobLogPollVals(event.target)">{% with log_rows=watch_log_rows %}{% include "partials/job_log_lines.html" %}{% endwith %}</pre>
-    </div>
+    <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+  </div>
+  <div class="modal-body modal-body-log">
+    <pre class="job-log-pre"
+         hx-get="/instances/{{ instance.id }}/jobs/{{ job.id }}/logs"
+         hx-trigger="load, every 2s [document.visibilityState=='visible']"
+         hx-swap="beforeend"
+         hx-vals="js:{after_id: jobLogPollVals().after_id}">{% with log_rows=watch_log_rows %}{% include "partials/job_log_lines.html" %}{% endwith %}</pre>
   </div>
 </div>
+<div id="instance-flash" hx-swap-oob="innerHTML"></div>
+{% include "partials/instance_live_oob.html" %}

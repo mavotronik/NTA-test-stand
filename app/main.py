@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -134,6 +135,79 @@ def _instance_current_task(db: Database, instance_id: str) -> dict[str, Any] | N
             (instance_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def _instance_jobs(db: Database, instance_id: str) -> list[dict[str, Any]]:
+    with db.connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM deployment_jobs WHERE instance_id=? ORDER BY created_at DESC LIMIT 20",
+            (instance_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _is_htmx(request: Request) -> bool:
+    return request.headers.get("HX-Request", "").lower() == "true"
+
+
+def _htmx_flash_error(message: str) -> HTMLResponse:
+    return HTMLResponse(
+        f'<p style="color:var(--danger);">{html.escape(message)}</p>',
+        headers={
+            "HX-Retarget": "#instance-flash",
+            "HX-Reswap": "innerHTML",
+        },
+    )
+
+
+def _render_instance_job_watch(
+    request: Request,
+    db: Database,
+    user: dict[str, Any],
+    inst: dict[str, Any],
+    job: dict[str, Any],
+) -> HTMLResponse:
+    settings = get_settings()
+    return _render(
+        request,
+        "partials/instance_job_watch.html",
+        {
+            "user": user,
+            "instance": inst,
+            "job": job,
+            "watch_log_rows": _job_log_lines(db, job["id"]),
+            "job_type_labels": JOB_TYPE_LABELS,
+            "public_host": settings.policy.public_host,
+            "active_job": get_instance_active_job(db, inst["id"]),
+            "jobs": _instance_jobs(db, inst["id"]),
+        },
+    )
+
+
+def _after_instance_job_queued(
+    request: Request,
+    db: Database,
+    user: dict[str, Any],
+    inst: dict[str, Any],
+    job_id: str,
+    *,
+    redirect: str,
+) -> HTMLResponse:
+    if _is_htmx(request):
+        job = get_instance_job(db, inst["id"], job_id)
+        if not job:
+            return _htmx_flash_error("Задача не найдена")
+        resp = _render_instance_job_watch(request, db, user, inst, job)
+        resp.headers["HX-Trigger"] = "instance-live-refresh"
+        return resp
+    return RedirectResponse(redirect, status_code=302)
+
+
+def _instance_queue_error(request: Request, instance_id: str, err: Exception, *, return_to: str = "") -> HTMLResponse:
+    if _is_htmx(request):
+        return _htmx_flash_error(str(err))
+    path = "/instances" if return_to == "instances" else f"/instances/{instance_id}"
+    return RedirectResponse(f"{path}?error={err}", status_code=302)
 
 
 AUDIT_ACTION_LABELS: dict[str, str] = {
@@ -626,16 +700,11 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
         raise HTTPException(404)
     message = request.query_params.get("message", "").replace("+", " ")
     error = request.query_params.get("error", "").replace("+", " ")
-    with db.connection() as conn:
-        jobs = [dict(r) for r in conn.execute(
-            "SELECT * FROM deployment_jobs WHERE instance_id=? ORDER BY created_at DESC LIMIT 20",
-            (instance_id,),
-        ).fetchall()]
+    jobs = _instance_jobs(db, instance_id)
     job_param = request.query_params.get("job", "")
     watch_job = _instance_watch_job(db, instance_id, job_param)
     current_task = _instance_current_task(db, instance_id)
     active_job = get_instance_active_job(db, instance_id)
-    watch_log_rows = _job_log_lines(db, watch_job["id"]) if watch_job else []
     return _render(
         request,
         "instance_detail.html",
@@ -645,7 +714,6 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
             "instance": inst,
             "jobs": jobs,
             "watch_job": watch_job,
-            "watch_log_rows": watch_log_rows,
             "current_task": current_task,
             "active_job": active_job,
             "job_type_labels": JOB_TYPE_LABELS,
@@ -673,7 +741,7 @@ async def instance_rollback(
     try:
         jid = queue_job(db, instance_id, "instance_rollback", user["id"])
     except ValueError as err:
-        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
+        return _instance_queue_error(request, instance_id, err)
     write_audit(
         db,
         user_id=user["id"],
@@ -684,7 +752,14 @@ async def instance_rollback(
         target_id=jid,
         ip=_client_ip(request),
     )
-    return RedirectResponse(f"/instances/{instance_id}?message=rollback+queued", status_code=302)
+    return _after_instance_job_queued(
+        request,
+        db,
+        user,
+        inst,
+        jid,
+        redirect=f"/instances/{instance_id}?message=rollback+queued",
+    )
 
 
 @app.post("/instances/{instance_id}/build")
@@ -704,9 +779,16 @@ async def instance_build(
     try:
         jid = queue_job(db, instance_id, "build", user["id"])
     except ValueError as err:
-        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
+        return _instance_queue_error(request, instance_id, err)
     write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="build_queue", target_type="job", target_id=jid, ip=_client_ip(request))
-    return RedirectResponse(f"/instances/{instance_id}?message=build+queued", status_code=302)
+    return _after_instance_job_queued(
+        request,
+        db,
+        user,
+        inst,
+        jid,
+        redirect=f"/instances/{instance_id}?message=build+queued",
+    )
 
 
 @app.post("/instances/{instance_id}/build-run")
@@ -726,7 +808,7 @@ async def instance_build_run(
     try:
         jid = queue_job(db, instance_id, "build_run", user["id"])
     except ValueError as err:
-        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
+        return _instance_queue_error(request, instance_id, err)
     write_audit(
         db,
         user_id=user["id"],
@@ -737,7 +819,14 @@ async def instance_build_run(
         target_id=jid,
         ip=_client_ip(request),
     )
-    return RedirectResponse(f"/instances/{instance_id}?job={jid}", status_code=302)
+    return _after_instance_job_queued(
+        request,
+        db,
+        user,
+        inst,
+        jid,
+        redirect=f"/instances/{instance_id}?job={jid}",
+    )
 
 
 @app.get("/instances/{instance_id}/jobs/{job_id}/status", response_class=HTMLResponse)
@@ -785,6 +874,23 @@ async def instance_job_logs_partial(
     return _render(request, "partials/job_log_lines.html", {"log_rows": log_rows})
 
 
+@app.get("/instances/{instance_id}/jobs/{job_id}/watch", response_class=HTMLResponse)
+async def instance_job_watch_partial(
+    request: Request,
+    instance_id: str,
+    job_id: str,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    job = get_instance_job(db, instance_id, job_id)
+    if not job:
+        raise HTTPException(404)
+    return _render_instance_job_watch(request, db, user, inst, job)
+
+
 @app.get("/instances/{instance_id}/current-task", response_class=HTMLResponse)
 async def instance_current_task_partial(
     request: Request,
@@ -792,13 +898,21 @@ async def instance_current_task_partial(
     db: Database = Depends(get_db),
     user=Depends(current_user),
 ):
-    if not get_instance(db, instance_id):
+    inst = get_instance(db, instance_id)
+    if not inst:
         raise HTTPException(404)
     task = _instance_current_task(db, instance_id)
     return _render(
         request,
-        "partials/instance_current_task.html",
-        {"user": user, "task": task, "job_type_labels": JOB_TYPE_LABELS},
+        "partials/instance_current_task_poll.html",
+        {
+            "user": user,
+            "instance": inst,
+            "task": task,
+            "active_job": get_instance_active_job(db, instance_id),
+            "jobs": _instance_jobs(db, instance_id),
+            "job_type_labels": JOB_TYPE_LABELS,
+        },
     )
 
 
@@ -824,9 +938,16 @@ async def instance_deploy(
     try:
         jid = queue_job(db, instance_id, "deploy", user["id"])
     except ValueError as err:
-        return RedirectResponse(f"/instances/{instance_id}?error={err}", status_code=302)
+        return _instance_queue_error(request, instance_id, err)
     write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="deploy_queue", target_type="job", target_id=jid, ip=_client_ip(request))
-    return RedirectResponse(f"/instances/{instance_id}?message=deploy+queued", status_code=302)
+    return _after_instance_job_queued(
+        request,
+        db,
+        user,
+        inst,
+        jid,
+        redirect=f"/instances/{instance_id}?message=deploy+queued",
+    )
 
 
 @app.post("/instances/{instance_id}/start")
@@ -854,8 +975,7 @@ async def instance_start(
     try:
         jid = queue_job(db, instance_id, "instance_start", user["id"])
     except ValueError as err:
-        path = "/instances" if return_to == "instances" else f"/instances/{instance_id}"
-        return RedirectResponse(f"{path}?error={err}", status_code=302)
+        return _instance_queue_error(request, instance_id, err, return_to=return_to)
     write_audit(
         db,
         user_id=user["id"],
@@ -887,8 +1007,7 @@ async def instance_stop(
     try:
         jid = queue_job(db, instance_id, "instance_stop", user["id"])
     except ValueError as err:
-        path = "/instances" if return_to == "instances" else f"/instances/{instance_id}"
-        return RedirectResponse(f"{path}?error={err}", status_code=302)
+        return _instance_queue_error(request, instance_id, err, return_to=return_to)
     write_audit(
         db,
         user_id=user["id"],
@@ -899,6 +1018,15 @@ async def instance_stop(
         target_id=jid,
         ip=_client_ip(request),
     )
+    if _is_htmx(request) and return_to != "instances":
+        return _after_instance_job_queued(
+            request,
+            db,
+            user,
+            inst,
+            jid,
+            redirect=f"/instances/{instance_id}?message=stop+queued",
+        )
     return _instance_action_redirect(instance_id, return_to, message="stop+queued")
 
 

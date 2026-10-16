@@ -56,7 +56,7 @@
   document.body.addEventListener('htmx:beforeSwap', (evt) => {
     const target = evt.detail.target;
     if (target?.id === 'instance-job-status') {
-      const root = document.getElementById('instance-job-watch');
+      const root = instanceJobWatchRoot();
       const header = target.querySelector('[data-job-status]');
       if (root && header) {
         root.dataset.pendingPrevJobStatus = header.dataset.jobStatus || '';
@@ -90,6 +90,8 @@
 
   function scheduleAutoOpenInstanceUi(root, prevStatus) {
     if (!root || root.dataset.jobType !== 'build_run') return;
+    const overlay = root.closest('.modal-overlay');
+    if (overlay && !overlay.classList.contains('visible')) return;
     if (!ACTIVE_JOB_STATUSES.has(prevStatus)) return;
 
     const header = root.querySelector('[data-job-status="done"][data-job-type="build_run"]');
@@ -115,18 +117,24 @@
 
   document.querySelectorAll('.instance-auto-open-ui').forEach(initInstanceAutoOpenUi);
 
-  const instanceJobWatch = document.getElementById('instance-job-watch');
-  if (instanceJobWatch) {
-    const initialHeader = instanceJobWatch.querySelector('[data-job-status]');
+  function instanceJobWatchRoot() {
+    return document.getElementById('instance-job-watch');
+  }
+
+  function initInstanceJobWatch(root) {
+    if (!root) return;
+    const initialHeader = root.querySelector('[data-job-status]');
     if (initialHeader) {
-      instanceJobWatch.dataset.lastJobStatus = initialHeader.dataset.jobStatus || '';
+      root.dataset.lastJobStatus = initialHeader.dataset.jobStatus || '';
     }
   }
+
+  initInstanceJobWatch(instanceJobWatchRoot());
 
   window.jobLogPollVals = function jobLogPollVals(target) {
     const pre = target?.classList?.contains('job-log-pre')
       ? target
-      : target?.closest?.('.job-log-pre');
+      : document.querySelector('.modal-overlay.visible .job-log-pre') || document.querySelector('.job-log-pre');
     if (!pre) return { after_id: 0 };
     let afterId = 0;
     pre.querySelectorAll('.job-log-line[data-log-id]').forEach((el) => {
@@ -462,7 +470,10 @@
   document.body.addEventListener('htmx:beforeRequest', (evt) => {
     const target = evt.detail.target;
     if (target?.id === 'formModalInner') openOverlay(document.getElementById('formModal'));
-    if (target?.id === 'logModalInner') openOverlay(document.getElementById('logModal'));
+    const verb = (evt.detail.requestConfig?.verb || 'get').toLowerCase();
+    if (target?.id === 'logModalInner' && verb === 'get') {
+      openOverlay(document.getElementById('logModal'));
+    }
   });
 
   document.body.addEventListener('htmx:afterSwap', (evt) => {
@@ -475,7 +486,9 @@
     }
     if (target?.id === 'logModalInner') {
       openOverlay(document.getElementById('logModal'));
+      initInstanceJobWatch(instanceJobWatchRoot());
       target.querySelectorAll('.job-log-autoscroll').forEach(initJobLogAutoscrollToggle);
+      target.querySelectorAll('.instance-auto-open-ui').forEach(initInstanceAutoOpenUi);
       target.querySelectorAll('.job-log-pre').forEach((pre) => {
         if (jobLogAutoscrollEnabled(pre)) scrollJobLogToBottom(pre);
       });
@@ -485,7 +498,7 @@
     target.querySelectorAll('.job-log-autoscroll').forEach(initJobLogAutoscrollToggle);
     target.querySelectorAll('.instance-auto-open-ui').forEach(initInstanceAutoOpenUi);
 
-    const root = document.getElementById('instance-job-watch');
+    const root = instanceJobWatchRoot();
     const prevStatus = root?.dataset.pendingPrevJobStatus || root?.dataset.lastJobStatus || '';
     if (root) delete root.dataset.pendingPrevJobStatus;
     const header = root?.querySelector('[data-job-status]');

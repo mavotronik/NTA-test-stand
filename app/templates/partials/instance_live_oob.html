@@ -1,0 +1,10 @@
+<div id="instance-subtitle" hx-swap-oob="innerHTML">{{ instance.slug }} · {{ instance.state }}</div>
+<div id="instance-active-job" hx-swap-oob="innerHTML">{% include "partials/instance_active_job.html" %}</div>
+<div id="instance-config" hx-swap-oob="innerHTML">{% include "partials/instance_config.html" %}</div>
+<div id="instance-actions" hx-swap-oob="innerHTML">{% include "partials/instance_actions.html" %}</div>
+<div class="table-wrapper" id="instance-jobs-wrap" hx-swap-oob="innerHTML">
+  <table>
+    <thead><tr><th>ID</th><th>Тип</th><th>Статус</th><th>Этап</th><th>Создана</th><th></th></tr></thead>
+    <tbody>{% include "partials/instance_jobs_rows.html" %}</tbody>
+  </table>
+</div>

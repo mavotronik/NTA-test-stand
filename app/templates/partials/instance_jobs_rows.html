@@ -1,0 +1,8 @@
+{% for j in jobs %}
+<tr>
+  <td>{{ j.id[:10] }}…</td><td>{{ job_type_labels.get(j.job_type, j.job_type) }}</td><td>{{ j.status }}</td><td>{{ j.stage }}</td><td>{{ j.created_at }}</td>
+  <td>{% with job_id=j.id %}{% include "partials/log_modal_link.html" %}{% endwith %}</td>
+</tr>
+{% else %}
+<tr><td colspan="6">Нет задач</td></tr>
+{% endfor %}

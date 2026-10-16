@@ -1,0 +1,59 @@
+<form method="post" action="/instances/{{ instance.id }}/build-run" style="margin-bottom:8px;"
+      hx-post="/instances/{{ instance.id }}/build-run"
+      hx-target="#logModalInner"
+      hx-swap="innerHTML"
+      hx-push-url="false"
+      hx-disabled-elt="find button">
+  <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+  <button class="button primary" type="submit"{% if active_job %} disabled{% endif %}><span class="mdi mdi-play-circle"></span> Собрать и запустить</button>
+</form>
+<form method="post" action="/instances/{{ instance.id }}/build" style="margin-bottom:8px;"
+      hx-post="/instances/{{ instance.id }}/build"
+      hx-target="#logModalInner"
+      hx-swap="innerHTML"
+      hx-push-url="false"
+      hx-disabled-elt="find button">
+  <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+  <button class="button" type="submit"{% if active_job %} disabled{% endif %}><span class="mdi mdi-docker"></span> Собрать образ</button>
+</form>
+<form method="post" action="/instances/{{ instance.id }}/deploy" style="margin-bottom:8px;"
+      hx-post="/instances/{{ instance.id }}/deploy"
+      hx-target="#logModalInner"
+      hx-swap="innerHTML"
+      hx-push-url="false"
+      hx-disabled-elt="find button">
+  <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+  <button class="button primary" type="submit"{% if active_job %} disabled{% endif %}><span class="mdi mdi-rocket-launch"></span> Развернуть</button>
+</form>
+{% if instance.rollback_image_tag %}
+<form method="post" action="/instances/{{ instance.id }}/rollback" style="margin-bottom:8px;"
+      hx-post="/instances/{{ instance.id }}/rollback"
+      hx-target="#logModalInner"
+      hx-swap="innerHTML"
+      hx-push-url="false"
+      hx-disabled-elt="find button">
+  <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+  <button class="button" type="submit"{% if active_job %} disabled{% endif %}><span class="mdi mdi-backup-restore"></span> Откатить образ</button>
+</form>
+{% endif %}
+<form method="post" action="/instances/{{ instance.id }}/stop" style="margin-bottom:8px;"
+      hx-post="/instances/{{ instance.id }}/stop"
+      hx-target="#logModalInner"
+      hx-swap="innerHTML"
+      hx-push-url="false"
+      hx-disabled-elt="find button">
+  <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+  <button class="button danger" type="submit"{% if active_job %} disabled{% endif %}><span class="mdi mdi-stop"></span> Остановить</button>
+</form>
+{% if user.role in ('admin', 'operator') %}
+<form method="post" action="/instances/{{ instance.id }}/delete"
+      data-confirm
+      data-confirm-title="Удалить инстанс?"
+      data-confirm-message="Инстанс «{{ instance.name }}» будет удалён. Контейнер будет остановлен."
+      data-confirm-ok="Удалить"
+      data-confirm-tone="danger"
+      data-confirm-icon="mdi-delete">
+  <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+  <button class="button danger" type="submit"{% if active_job %} disabled{% endif %}><span class="mdi mdi-delete"></span> Удалить инстанс</button>
+</form>
+{% endif %}

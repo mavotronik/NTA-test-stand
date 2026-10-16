@@ -560,6 +560,122 @@ class HttpTests(unittest.TestCase):
         self.assertIn("Удалить инстанс?", detail.text)
         self.assertNotIn("onsubmit=", detail.text)
 
+    def test_build_run_htmx_opens_watch_and_live_partials(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        from app.db import Database
+        from app.repositories import create_instance, list_users, save_db_profile
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="watch-profile",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        iid = create_instance(
+            db,
+            slug="watch-inst",
+            name="Watch Inst",
+            port=3220,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+        )
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE instances SET git_commit='abc1234', image_tag='old:tag', container_id='0123456789ab' WHERE id=?",
+                (iid,),
+            )
+        detail = self.client.get(f"/instances/{iid}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn('id="instance-config"', detail.text)
+        self.assertIn('id="instance-actions"', detail.text)
+        self.assertIn('hx-post="/instances/%s/build-run"' % iid, detail.text)
+        self.assertIn("abc1234", detail.text)
+        self.assertIn("old:tag", detail.text)
+        self.assertIn("0123456789ab"[:12], detail.text)
+        m = re.search(r'name="csrf_token" value="([^"]+)"', detail.text)
+        self.assertIsNotNone(m)
+        csrf = m.group(1)
+
+        redirected = self.client.post(
+            f"/instances/{iid}/build-run",
+            data={"csrf_token": csrf},
+            follow_redirects=False,
+        )
+        self.assertEqual(redirected.status_code, 302)
+        self.assertIn(f"/instances/{iid}?job=", redirected.headers.get("location", ""))
+
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE deployment_jobs SET status='done' WHERE instance_id=? AND status IN ('queued','running')",
+                (iid,),
+            )
+
+        live = self.client.post(
+            f"/instances/{iid}/build-run",
+            data={"csrf_token": csrf},
+            headers={"HX-Request": "true"},
+            follow_redirects=False,
+        )
+        self.assertEqual(live.status_code, 200)
+        self.assertIn("js-log-modal-dialog", live.text)
+        self.assertIn("job-log-pre", live.text)
+        self.assertIn("js:{after_id: jobLogPollVals().after_id}", live.text)
+        self.assertIn('id="instance-job-watch"', live.text)
+        self.assertIn("hx-swap-oob", live.text)
+        self.assertIn('id="instance-config"', live.text)
+        self.assertIn('id="instance-actions"', live.text)
+        self.assertRegex(live.text, r'type="submit" disabled')
+        self.assertEqual(live.headers.get("HX-Trigger"), "instance-live-refresh")
+
+        with db.connection() as conn:
+            job = conn.execute(
+                "SELECT id FROM deployment_jobs WHERE instance_id=? AND job_type='build_run' ORDER BY created_at DESC LIMIT 1",
+                (iid,),
+            ).fetchone()
+        self.assertIsNotNone(job)
+        watch = self.client.get(f"/instances/{iid}/jobs/{job['id']}/watch")
+        self.assertEqual(watch.status_code, 200)
+        self.assertIn("job-log-pre", watch.text)
+
+        conflict = self.client.post(
+            f"/instances/{iid}/build-run",
+            data={"csrf_token": csrf},
+            headers={"HX-Request": "true"},
+            follow_redirects=False,
+        )
+        self.assertEqual(conflict.status_code, 200)
+        self.assertEqual(conflict.headers.get("HX-Retarget"), "#instance-flash")
+        self.assertIn("conflicting job already active", conflict.text)
+
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE instances SET git_commit='def5678', image_tag='new:tag', container_id='fedcba987654' WHERE id=?",
+                (iid,),
+            )
+            conn.execute(
+                "UPDATE deployment_jobs SET status='done' WHERE instance_id=? AND status IN ('queued','running')",
+                (iid,),
+            )
+        task = self.client.get(f"/instances/{iid}/current-task")
+        self.assertEqual(task.status_code, 200)
+        self.assertIn("hx-swap-oob", task.text)
+        self.assertIn("def5678", task.text)
+        self.assertIn("new:tag", task.text)
+        self.assertIn("fedcba987654"[:12], task.text)
+        actions_html = task.text.split('id="instance-actions"', 1)[-1].split('id="instance-jobs-wrap"', 1)[0]
+        self.assertNotRegex(actions_html, r'type="submit" disabled')
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,1 @@
+{% if active_job %}<p style="color:var(--text-secondary);">Выполняется задача: {{ job_type_labels.get(active_job.job_type, active_job.job_type) }} ({{ active_job.status }}). Действия временно недоступны.</p>{% endif %}
