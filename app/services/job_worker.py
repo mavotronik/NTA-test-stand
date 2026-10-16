@@ -390,7 +390,7 @@ class JobWorker:
 
             build_date = utc_now()
             if self.docker.can_compose_ui_build(ui_compose_dir):
-                logs.append(f"docker compose build in {ui_compose_dir}")
+                logs.append(f"ui image build in {ui_compose_dir}")
                 _, image_id = self.docker.build_ui_image_compose(
                     ui_compose_dir,
                     tag,

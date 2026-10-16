@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 import docker
+import yaml
 from docker.errors import NotFound
 from docker.models.containers import Container
 
@@ -19,6 +20,70 @@ UI_APP_GID = 1001
 
 COMPOSE_UI_BUILD_MAX_ATTEMPTS = 3
 COMPOSE_UI_BUILD_RETRY_DELAY_SEC = 5
+
+
+def ui_compose_build_uses_host_network(compose_file: Path, service: str = "grapes-nta") -> bool:
+    """True, если build сервиса просит сеть хоста (Buildx требует --allow=network.host)."""
+    data = yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}
+    services = data.get("services") or {}
+    spec = services.get(service) or {}
+    if not isinstance(spec, dict):
+        return False
+    build = spec.get("build")
+    if not isinstance(build, dict):
+        return False
+    return str(build.get("network") or "") == "host"
+
+
+def ui_image_build_command(ui_dir: Path, *, build_date: str, service: str = "grapes-nta") -> list[str]:
+    """Команда сборки образа UI.
+
+    `docker compose build` не умеет выдать entitlement network.host. Если compose
+    просит build.network: host, собираем тем же context/Dockerfile через buildx
+    с --allow=network.host. Иначе оставляем compose build.
+    """
+    ui_dir = ui_dir.resolve()
+    compose_file = ui_dir / "docker-compose.yml"
+    if not ui_compose_build_uses_host_network(compose_file, service):
+        return [
+            "docker",
+            "compose",
+            "-f",
+            str(compose_file),
+            "build",
+            "--build-arg",
+            f"BUILD_DATE={build_date}",
+            service,
+        ]
+
+    data = yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}
+    spec = ((data.get("services") or {}).get(service) or {})
+    build = spec.get("build") if isinstance(spec, dict) else {}
+    if not isinstance(build, dict):
+        build = {}
+    context = (ui_dir / str(build.get("context") or ".")).resolve()
+    dockerfile = str(build.get("dockerfile") or "Dockerfile")
+    df_path = Path(dockerfile)
+    if not df_path.is_absolute():
+        df_path = context / df_path
+    image = "grapes-nta:latest"
+    if isinstance(spec, dict) and spec.get("image"):
+        image = str(spec["image"])
+    return [
+        "docker",
+        "buildx",
+        "build",
+        "--allow=network.host",
+        "--network=host",
+        "--load",
+        "--build-arg",
+        f"BUILD_DATE={build_date}",
+        "-f",
+        str(df_path),
+        "-t",
+        image,
+        str(context),
+    ]
 
 
 def compose_build_apk_dns_retryable(output: str) -> bool:
@@ -134,16 +199,9 @@ class DockerService:
         if not compose_file.is_file():
             raise RuntimeError(f"missing {compose_file}")
 
-        cmd = [
-            "docker",
-            "compose",
-            "-f",
-            str(compose_file),
-            "build",
-            "--build-arg",
-            f"BUILD_DATE={build_date}",
-            "grapes-nta",
-        ]
+        cmd = ui_image_build_command(ui_dir, build_date=build_date)
+        if log_callback:
+            log_callback(" ".join(cmd))
         proc: subprocess.CompletedProcess[str] | None = None
         for attempt in range(1, COMPOSE_UI_BUILD_MAX_ATTEMPTS + 1):
             proc = subprocess.run(
@@ -183,6 +241,8 @@ class DockerService:
             raise RuntimeError(msg)
 
         base_tag = "grapes-nta:latest"
+        if "-t" in cmd:
+            base_tag = cmd[cmd.index("-t") + 1]
         tag_proc = subprocess.run(
             ["docker", "tag", base_tag, tag],
             capture_output=True,
