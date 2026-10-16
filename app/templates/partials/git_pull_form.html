@@ -1,0 +1,13 @@
+<form method="post" action="/git/pull" class="{{ form_class|default('') }}" style="display:inline;"
+  data-confirm
+  data-confirm-title="Принудительно обновить GrapesNTA?"
+  data-confirm-message="Текущая ветка будет сброшена на upstream. Локальные коммиты и изменения отслеживаемых файлов пропадут."
+  data-confirm-ok="Сбросить и обновить"
+  data-confirm-tone="danger"
+  data-confirm-icon="mdi-source-pull">
+  <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+  <input type="hidden" name="force" value="1">
+  <input type="hidden" name="return_to" value="{{ return_to }}">
+  {% if instance_id %}<input type="hidden" name="instance_id" value="{{ instance_id }}">{% endif %}
+  <button class="button" type="submit"><span class="mdi mdi-source-pull"></span> Принудительно обновить</button>
+</form>

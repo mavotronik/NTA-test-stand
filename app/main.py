@@ -396,9 +396,19 @@ def _instance_form_ctx(
     *,
     instance: dict | None = None,
     form: dict | None = None,
+    pull: bool = False,
 ) -> dict:
     repo = Path(settings.policy.git_remote_url)
-    branches = git_service.list_branches(repo, settings.policy) or ["main"]
+    git_sync = ""
+    git_sync_error = ""
+    fetched = False
+    if pull:
+        try:
+            git_sync = git_service.pull_repo(repo)
+            fetched = True
+        except git_service.GitError as err:
+            git_sync_error = str(err)
+    branches = git_service.list_branches(repo, settings.policy, fetch=not fetched) or ["main"]
     exclude_id = instance["id"] if instance else None
     occupied = list_occupied_ports(db, exclude_id=exclude_id)
     suggested = next_free_port(
@@ -437,7 +447,49 @@ def _instance_form_ctx(
         "ready_images": list_ready_build_images(db),
         "form": base_form,
         "instance": instance,
+        "git_sync": git_sync,
+        "git_sync_error": git_sync_error,
     }
+
+
+def _form_flash(request: Request) -> dict[str, str]:
+    return {
+        "flash_message": request.query_params.get("message", "").replace("+", " "),
+        "flash_error": request.query_params.get("error", "").replace("+", " "),
+    }
+
+
+def _safe_instance_id(instance_id: str) -> str:
+    iid = (instance_id or "").strip().lower()
+    if len(iid) == 32 and all(c in "0123456789abcdef" for c in iid):
+        return iid
+    return ""
+
+
+def _git_pull_redirect(
+    return_to: str,
+    instance_id: str,
+    *,
+    message: str = "",
+    error: str = "",
+) -> RedirectResponse:
+    iid = _safe_instance_id(instance_id)
+    if return_to == "new":
+        path = "/instances/new"
+    elif return_to == "edit" and iid:
+        path = f"/instances/{iid}/edit"
+    elif return_to == "detail" and iid:
+        path = f"/instances/{iid}"
+    else:
+        path = "/instances"
+    params: list[str] = []
+    if message:
+        params.append(f"message={quote(message)}")
+    if error:
+        params.append(f"error={quote(error)}")
+    if params:
+        path = f"{path}?{'&'.join(params)}"
+    return RedirectResponse(path, status_code=302)
 
 
 def _port_conflict_message(owner: dict[str, Any], port: int) -> str:
@@ -483,14 +535,57 @@ def _instances_bulk_redirect(*, message: str = "", error: str = "") -> RedirectR
     return RedirectResponse(path, status_code=302)
 
 
+@app.post("/git/pull")
+async def git_pull_post(
+    request: Request,
+    force: str = Form(""),
+    return_to: str = Form("instances"),
+    instance_id: str = Form(""),
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    repo = Path(settings.policy.git_remote_url)
+    try:
+        message = git_service.pull_repo(repo, force=force == "1")
+    except git_service.GitError as err:
+        write_audit(
+            db,
+            user_id=user["id"],
+            username=user["username"],
+            role=user["role"],
+            action="git_pull",
+            target_type="git",
+            detail={"force": force == "1"},
+            ip=_client_ip(request),
+            ok=False,
+            error=str(err),
+        )
+        return _git_pull_redirect(return_to, instance_id, error=str(err))
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="git_pull",
+        target_type="git",
+        detail={"force": force == "1", "result": message},
+        ip=_client_ip(request),
+    )
+    return _git_pull_redirect(return_to, instance_id, message=message)
+
+
 @app.get("/instances/new", response_class=HTMLResponse)
 async def instance_new_page(request: Request, db: Database = Depends(get_db), settings=Depends(get_settings), user=Depends(current_user)):
     require_role(user, "operator")
-    ctx = _instance_form_ctx(db, settings)
+    ctx = _instance_form_ctx(db, settings, pull=True)
     return _render(
         request,
         "instance_form.html",
-        {"user": user, "active": "instances", **ctx},
+        {"user": user, "active": "instances", **_form_flash(request), **ctx},
     )
 
 
@@ -583,11 +678,11 @@ async def instance_edit_page(
     inst = get_instance(db, instance_id)
     if not inst:
         raise HTTPException(404)
-    ctx = _instance_form_ctx(db, settings, instance=inst)
+    ctx = _instance_form_ctx(db, settings, instance=inst, pull=True)
     return _render(
         request,
         "instance_form.html",
-        {"user": user, "active": "instances", **ctx},
+        {"user": user, "active": "instances", **_form_flash(request), **ctx},
     )
 
 

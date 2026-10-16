@@ -160,7 +160,10 @@ class HttpTests(unittest.TestCase):
             writable=False,
             comment="",
         )
-        with mock.patch("app.main.git_service.list_branches", return_value=["main"]):
+        with (
+            mock.patch("app.main.git_service.list_branches", return_value=["main"]),
+            mock.patch("app.main.git_service.pull_repo", return_value="main: up to date (abc1234)"),
+        ):
             empty = self.client.get("/instances/new")
             self.assertEqual(empty.status_code, 200)
             self.assertIn('id="instance-port"', empty.text)
@@ -168,6 +171,9 @@ class HttpTests(unittest.TestCase):
             self.assertIn('id="instanceFormModal"', empty.text)
             self.assertIn('value="3100"', empty.text)
             self.assertIn("Подставлен первый свободный порт", empty.text)
+            self.assertIn("Репозиторий обновлён: main: up to date (abc1234)", empty.text)
+            self.assertIn('action="/git/pull"', empty.text)
+            self.assertIn('name="force" value="1"', empty.text)
 
             first_id = create_instance(
                 db,
@@ -268,6 +274,70 @@ class HttpTests(unittest.TestCase):
                 saved.headers.get("location", ""),
             )
             self.assertIn("уже занят инстансом «Новый»", edit_conflict.text)
+
+    def test_force_git_pull_redirects_back_to_form(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        csrf = self._admin_csrf()
+        from app.db import Database
+        from app.repositories import create_instance, list_users, save_db_profile
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="git-pull-profile",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        instance_id = create_instance(
+            db,
+            slug="git-pull-inst",
+            name="Git pull",
+            port=3188,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+        )
+        listing = self.client.get("/instances")
+        self.assertIn("Принудительно обновить", listing.text)
+        detail = self.client.get(f"/instances/{instance_id}")
+        self.assertIn("Принудительно обновить", detail.text)
+        self.assertIn(f'name="instance_id" value="{instance_id}"', detail.text)
+
+        with mock.patch(
+            "app.main.git_service.pull_repo",
+            return_value="main сброшена на origin/main (def5678)",
+        ) as forced:
+            resp = self.client.post(
+                "/git/pull",
+                data={
+                    "csrf_token": csrf,
+                    "force": "1",
+                    "return_to": "edit",
+                    "instance_id": instance_id,
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 302)
+            self.assertIn(f"/instances/{instance_id}/edit?message=", resp.headers.get("location", ""))
+            forced.assert_called_once()
+            self.assertTrue(forced.call_args.kwargs.get("force"))
+
+            evil = self.client.post(
+                "/git/pull",
+                data={"csrf_token": csrf, "force": "1", "return_to": "https://evil.example/phish"},
+                follow_redirects=False,
+            )
+        self.assertEqual(evil.status_code, 302)
+        self.assertTrue(evil.headers.get("location", "").startswith("/instances?"))
 
     def _port_input_class(self, html: str) -> str:
         match = re.search(r'<input class="([^"]*)" id="instance-port"', html)

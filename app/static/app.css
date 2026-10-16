@@ -1400,9 +1400,18 @@
             margin-bottom: 0;
         }
 
+        .modal-header-action {
+            flex-shrink: 0;
+        }
+
         .modal-form-error {
             margin: 0 0 14px;
             color: var(--danger);
+        }
+
+        .modal-form-note {
+            margin: 0 0 14px;
+            color: var(--success);
         }
 
         .modal-body-log {

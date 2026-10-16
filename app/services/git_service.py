@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import fnmatch
 import hashlib
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,12 +14,15 @@ class GitError(RuntimeError):
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> str:
+    env = os.environ.copy()
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")
     proc = subprocess.run(
         cmd,
         cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     if proc.returncode != 0:
         msg = proc.stderr.strip() or proc.stdout.strip() or "git failed"
@@ -27,13 +30,52 @@ def _run(cmd: list[str], cwd: Path | None = None) -> str:
     return proc.stdout.strip()
 
 
-def list_branches(repo: Path, policy: Policy) -> list[str]:
+def _upstream_ref(repo: Path, branch: str) -> str:
+    try:
+        return _run(
+            ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"]
+        )
+    except GitError:
+        candidate = f"origin/{branch}"
+        try:
+            _run(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", candidate])
+        except GitError as err:
+            raise GitError(f"нет upstream для ветки {branch}") from err
+        return candidate
+
+
+def pull_repo(repo: Path, *, force: bool = False) -> str:
+    """Обновить checkout GrapesNTA.
+
+    Без force — ``git pull --ff-only``. С force текущая ветка сбрасывается на upstream:
+    локальные коммиты и правки отслеживаемых файлов пропадают.
+    """
+    repo = repo.resolve()
     if not repo.exists():
         raise GitError(f"repo not found: {repo}")
-    try:
-        _run(["git", "-C", str(repo), "fetch", "--prune"], cwd=None)
-    except GitError:
-        pass
+    branch = _run(["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"])
+    if force or branch == "HEAD":
+        _run(["git", "-C", str(repo), "fetch", "--prune"])
+        if branch == "HEAD":
+            return "fetched (detached HEAD)"
+        upstream = _upstream_ref(repo, branch)
+        _run(["git", "-C", str(repo), "reset", "--hard", upstream])
+        sha = _run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"])
+        return f"{branch} сброшена на {upstream} ({sha})"
+    out = _run(["git", "-C", str(repo), "pull", "--ff-only", "--prune"])
+    sha = _run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"])
+    summary = out.splitlines()[-1] if out else "up to date"
+    return f"{branch}: {summary} ({sha})"
+
+
+def list_branches(repo: Path, policy: Policy, *, fetch: bool = True) -> list[str]:
+    if not repo.exists():
+        raise GitError(f"repo not found: {repo}")
+    if fetch:
+        try:
+            _run(["git", "-C", str(repo), "fetch", "--prune"], cwd=None)
+        except GitError:
+            pass
     branches: list[str] = []
     for fmt_cmd in (
         ["git", "-C", str(repo), "branch", "-r", "--format=%(refname:short)"],
