@@ -10,14 +10,13 @@
 <div class="card">
   <div class="table-wrapper">
     <table>
-      <thead><tr><th>Имя</th><th>Host</th><th>БД</th><th>Writable</th><th>Проверка</th><th></th></tr></thead>
+      <thead><tr><th>Имя</th><th>Host</th><th>БД</th><th>Проверка</th><th></th></tr></thead>
       <tbody>
       {% for p in profiles %}
       <tr>
         <td>{{ p.name }}</td>
         <td>{{ p.host }}:{{ p.port }}</td>
         <td>{{ p.database_name }}</td>
-        <td>{{ 'да' if p.writable else 'нет' }}</td>
         <td>{% if p.last_check_ok %}<span class="status"><span class="status-dot status-online"></span>OK</span>{% elif p.last_check_at %}<span class="status"><span class="status-dot status-offline"></span>fail</span>{% else %}—{% endif %}</td>
         <td>
           {% with url="/databases/" ~ p.id ~ "/edit", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
@@ -40,7 +39,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6">Нет профилей</td></tr>
+      <tr><td colspan="5">Нет профилей</td></tr>
       {% endfor %}
       </tbody>
     </table>

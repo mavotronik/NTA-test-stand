@@ -1161,7 +1161,6 @@ async def database_save_new(
     username: str = Form(...),
     password: str = Form(""),
     tls: str | None = Form(None),
-    writable: str | None = Form(None),
     comment: str = Form(""),
     csrf_token: str = Form(""),
     db: Database = Depends(get_db),
@@ -1184,7 +1183,7 @@ async def database_save_new(
         username=username.strip(),
         password_enc=enc,
         tls=bool(tls),
-        writable=bool(writable),
+        writable=True,
         comment=comment.strip(),
     )
     write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="db_profile_save", target_type="db_profile", target_id=pid, ip=_client_ip(request))
@@ -1202,7 +1201,6 @@ async def database_save_edit(
     username: str = Form(...),
     password: str = Form(""),
     tls: str | None = Form(None),
-    writable: str | None = Form(None),
     comment: str = Form(""),
     csrf_token: str = Form(""),
     db: Database = Depends(get_db),
@@ -1229,7 +1227,7 @@ async def database_save_edit(
         username=username.strip(),
         password_enc=enc,
         tls=bool(tls),
-        writable=bool(writable),
+        writable=True,
         comment=comment.strip(),
     )
     write_audit(db, user_id=user["id"], username=user["username"], role=user["role"], action="db_profile_save", target_type="db_profile", target_id=pid, ip=_client_ip(request))
