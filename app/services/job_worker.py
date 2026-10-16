@@ -387,10 +387,12 @@ class JobWorker:
 
             def log_cb(line: str) -> None:
                 logs.append(line)
+                logs.flush()
 
             build_date = utc_now()
             if self.docker.can_compose_ui_build(ui_compose_dir):
                 logs.append(f"ui image build in {ui_compose_dir}")
+                logs.flush()
                 _, image_id = self.docker.build_ui_image_compose(
                     ui_compose_dir,
                     tag,
@@ -399,6 +401,7 @@ class JobWorker:
                 )
             else:
                 logs.append("docker compose unavailable; tar context build")
+                logs.flush()
                 _, image_id = self.docker.build_image(
                     context=ctx,
                     dockerfile="Dockerfile",

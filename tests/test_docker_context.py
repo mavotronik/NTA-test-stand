@@ -1,10 +1,12 @@
 import io
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from app.services.docker_service import (
+    _stream_command_output,
     _tar_build_context,
     compose_build_apk_dns_retryable,
     ui_image_build_command,
@@ -63,6 +65,7 @@ class UiImageBuildCommandTests(unittest.TestCase):
         self.assertEqual(cmd[0:3], ["docker", "buildx", "build"])
         self.assertIn("--allow=network.host", cmd)
         self.assertIn("--network=host", cmd)
+        self.assertIn("--progress=plain", cmd)
         self.assertIn("--load", cmd)
         self.assertIn("BUILD_DATE=2026-10-16T00:00:00Z", cmd)
         self.assertEqual(cmd[cmd.index("-t") + 1], "grapes-nta:latest")
@@ -83,6 +86,29 @@ class UiImageBuildCommandTests(unittest.TestCase):
         self.assertEqual(cmd[0:3], ["docker", "compose", "-f"])
         self.assertIn("build", cmd)
         self.assertNotIn("--allow=network.host", cmd)
+
+
+class StreamCommandOutputTests(unittest.TestCase):
+    def test_emits_each_line_before_the_process_exits(self):
+        seen: list[tuple[str, float]] = []
+
+        def on_line(line: str) -> None:
+            seen.append((line, time.monotonic()))
+
+        rc, text = _stream_command_output(
+            [
+                "python3",
+                "-c",
+                "import time; print('one', flush=True); time.sleep(0.4); print('two', flush=True)",
+            ],
+            cwd="/tmp",
+            log_callback=on_line,
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual([line for line, _ in seen], ["one", "two"])
+        self.assertGreaterEqual(seen[1][1] - seen[0][1], 0.3)
+        self.assertIn("one", text)
+        self.assertIn("two", text)
 
 
 if __name__ == "__main__":

@@ -75,6 +75,7 @@ def ui_image_build_command(ui_dir: Path, *, build_date: str, service: str = "gra
         "build",
         "--allow=network.host",
         "--network=host",
+        "--progress=plain",
         "--load",
         "--build-arg",
         f"BUILD_DATE={build_date}",
@@ -84,6 +85,46 @@ def ui_image_build_command(ui_dir: Path, *, build_date: str, service: str = "gra
         image,
         str(context),
     ]
+
+
+def _stream_command_output(
+    cmd: list[str],
+    *,
+    cwd: str,
+    log_callback: Callable[[str], None] | None,
+) -> tuple[int, str]:
+    """Читает stdout/stderr построчно, чтобы лог сборки появлялся до её конца.
+
+    Buildx без --progress=plain пишет кадры на TTY и в пайп почти ничего не отдаёт.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        bufsize=1,
+    )
+    lines: list[str] = []
+    assert proc.stdout is not None
+    finished = False
+    try:
+        for raw in proc.stdout:
+            for part in raw.replace("\r", "\n").split("\n"):
+                line = part.rstrip()
+                if not line:
+                    continue
+                lines.append(line)
+                if log_callback:
+                    log_callback(line)
+        finished = True
+    finally:
+        if not finished and proc.poll() is None:
+            proc.kill()
+        returncode = proc.wait()
+        proc.stdout.close()
+    return returncode, "\n".join(lines)
 
 
 def compose_build_apk_dns_retryable(output: str) -> bool:
@@ -202,25 +243,16 @@ class DockerService:
         cmd = ui_image_build_command(ui_dir, build_date=build_date)
         if log_callback:
             log_callback(" ".join(cmd))
-        proc: subprocess.CompletedProcess[str] | None = None
+        returncode = 1
+        combined = ""
         for attempt in range(1, COMPOSE_UI_BUILD_MAX_ATTEMPTS + 1):
-            proc = subprocess.run(
+            returncode, combined = _stream_command_output(
                 cmd,
                 cwd=str(ui_dir),
-                capture_output=True,
-                text=True,
-                check=False,
+                log_callback=log_callback,
             )
-            if log_callback:
-                if proc.stdout:
-                    for line in proc.stdout.splitlines():
-                        log_callback(line)
-                if proc.stderr:
-                    for line in proc.stderr.splitlines():
-                        log_callback(line)
-            if proc.returncode == 0:
+            if returncode == 0:
                 break
-            combined = f"{proc.stdout or ''}\n{proc.stderr or ''}"
             if (
                 attempt < COMPOSE_UI_BUILD_MAX_ATTEMPTS
                 and compose_build_apk_dns_retryable(combined)
@@ -233,11 +265,10 @@ class DockerService:
                     )
                 time.sleep(COMPOSE_UI_BUILD_RETRY_DELAY_SEC)
                 continue
-            msg = proc.stderr.strip() or proc.stdout.strip() or "docker compose build failed"
+            msg = combined.strip() or "docker compose build failed"
             raise RuntimeError(msg)
-        assert proc is not None
-        if proc.returncode != 0:
-            msg = proc.stderr.strip() or proc.stdout.strip() or "docker compose build failed"
+        if returncode != 0:
+            msg = combined.strip() or "docker compose build failed"
             raise RuntimeError(msg)
 
         base_tag = "grapes-nta:latest"
