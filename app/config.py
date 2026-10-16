@@ -11,6 +11,25 @@ import yaml
 
 MANAGER_KEY = "manager"
 
+_DEFAULT_LOOPBACK_PUBLIC_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def resolve_public_host(configured: str, request_host: str | None) -> str:
+    """Хост для ссылок на UI-инстансы (тот же сервер, другой порт).
+
+    Если в конфиге оставлен loopback по умолчанию, подставляется хост из запроса
+    (как пользователь открыл панель), иначе — значение public_host из config.yaml.
+    """
+    configured = configured.strip()
+    if configured not in _DEFAULT_LOOPBACK_PUBLIC_HOSTS:
+        return configured
+    if not request_host:
+        return configured
+    rh = request_host.strip().lower()
+    if rh in _DEFAULT_LOOPBACK_PUBLIC_HOSTS:
+        return configured
+    return request_host.strip()
+
 
 @dataclass
 class Policy:

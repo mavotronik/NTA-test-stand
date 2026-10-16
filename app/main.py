@@ -24,7 +24,7 @@ from app.auth import (
     session_from_request,
     verify_csrf,
 )
-from app.config import branch_allowed
+from app.config import branch_allowed, resolve_public_host
 from app.crypto_util import encrypt_secret, get_fernet, hash_password
 from app.db import Database, new_id, utc_now
 from app.deps import (
@@ -175,7 +175,6 @@ def _render_instance_job_watch(
     inst: dict[str, Any],
     job: dict[str, Any],
 ) -> HTMLResponse:
-    settings = get_settings()
     return _render(
         request,
         "partials/instance_job_watch.html",
@@ -185,7 +184,6 @@ def _render_instance_job_watch(
             "job": job,
             "watch_log_rows": _job_log_lines(db, job["id"]),
             "job_type_labels": JOB_TYPE_LABELS,
-            "public_host": settings.policy.public_host,
             "active_job": get_instance_active_job(db, inst["id"]),
             "jobs": _instance_jobs(db, inst["id"]),
         },
@@ -272,7 +270,19 @@ AUDIT_ACTION_TONE: dict[str, str] = {
 }
 
 
+def _request_hostname(request: Request) -> str | None:
+    host_header = request.headers.get("host")
+    if host_header:
+        return host_header.split(":")[0].strip() or None
+    return request.url.hostname
+
+
 def _render(request: Request, name: str, ctx: dict[str, Any], status: int = 200) -> HTMLResponse:
+    settings = get_settings()
+    ctx = {
+        **ctx,
+        "public_host": resolve_public_host(settings.policy.public_host, _request_hostname(request)),
+    }
     return templates.TemplateResponse(name, {"request": request, **ctx}, status_code=status)
 
 
@@ -383,7 +393,6 @@ async def instances_page(request: Request, db: Database = Depends(get_db), setti
             "user": user,
             "active": "instances",
             "instances": list_instances(db),
-            "public_host": settings.policy.public_host,
             "message": message,
             "error": error,
         },
@@ -820,7 +829,6 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
             "current_task": current_task,
             "active_job": active_job,
             "job_type_labels": JOB_TYPE_LABELS,
-            "public_host": settings.policy.public_host,
             "message": message,
             "error": error,
         },
@@ -955,7 +963,6 @@ async def instance_job_status_partial(
             "instance": inst,
             "job": job,
             "job_type_labels": JOB_TYPE_LABELS,
-            "public_host": settings.policy.public_host,
         },
     )
 

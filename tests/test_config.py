@@ -4,7 +4,13 @@ from pathlib import Path
 
 import yaml
 
-from app.config import branch_allowed, host_allowed, load_policy_from_mapping, load_settings
+from app.config import (
+    branch_allowed,
+    host_allowed,
+    load_policy_from_mapping,
+    load_settings,
+    resolve_public_host,
+)
 
 
 class ConfigTests(unittest.TestCase):
@@ -26,6 +32,13 @@ class ConfigTests(unittest.TestCase):
         policy = load_policy_from_mapping(data, config_dir=example_dir)
         self.assertTrue(host_allowed(policy, "127.0.0.1"))
         self.assertFalse(host_allowed(policy, "8.8.8.8"))
+
+    def test_resolve_public_host_from_request_when_default_loopback(self):
+        self.assertEqual(resolve_public_host("127.0.0.1", "192.168.1.10"), "192.168.1.10")
+        self.assertEqual(resolve_public_host("127.0.0.1", "grapes.example"), "grapes.example")
+        self.assertEqual(resolve_public_host("127.0.0.1", "127.0.0.1"), "127.0.0.1")
+        self.assertEqual(resolve_public_host("127.0.0.1", None), "127.0.0.1")
+        self.assertEqual(resolve_public_host("10.0.0.5", "192.168.1.10"), "10.0.0.5")
 
     def test_host_allowlist_disabled_when_cidrs_omitted(self):
         policy = load_policy_from_mapping({"clickhouse": {}})
