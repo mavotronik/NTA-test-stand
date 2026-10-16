@@ -50,7 +50,9 @@
       data-confirm
       data-confirm-title="Удалить инстанс?"
       data-confirm-message="Инстанс «{{ instance.name }}» будет удалён. Контейнер будет остановлен."
-      data-confirm-ok="Удалить"
+      data-confirm-cancel="Нет"
+      data-confirm-ok="Да"
+      data-confirm-ok-hover="Да, мне мама разрешила"
       data-confirm-tone="danger"
       data-confirm-icon="mdi-delete">
   <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">

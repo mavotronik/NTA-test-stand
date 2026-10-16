@@ -272,22 +272,38 @@
     );
   }
 
-  function setConfirmButtonLabel(btn, label, icon) {
+  function setConfirmButtonLabel(btn, label, icon, expandExtra) {
     if (!btn) return;
     btn.replaceChildren();
+    btn.classList.toggle('confirm-ok-expand', Boolean(expandExtra));
+    if (expandExtra) btn.setAttribute('aria-label', label + expandExtra);
+    else btn.removeAttribute('aria-label');
     if (icon) {
       const span = document.createElement('span');
       span.className = 'mdi ' + icon;
       btn.appendChild(span);
     }
-    btn.appendChild(document.createTextNode(icon ? ' ' + label : label));
+    const text = document.createElement('span');
+    text.className = 'confirm-ok-label';
+    text.appendChild(document.createTextNode(label));
+    if (expandExtra) {
+      const extra = document.createElement('span');
+      extra.className = 'confirm-ok-extra';
+      extra.setAttribute('aria-hidden', 'true');
+      const extraText = document.createElement('span');
+      extraText.textContent = expandExtra;
+      extra.appendChild(extraText);
+      text.appendChild(extra);
+    }
+    btn.appendChild(text);
   }
 
   function setModalTone(tone) {
     const t = tone || 'danger';
     if (confirmDialog) confirmDialog.dataset.tone = t;
     if (!confirmOk) return;
-    confirmOk.className = 'button ' + (t === 'success' ? 'success' : t === 'primary' ? 'primary' : 'danger');
+    confirmOk.classList.remove('success', 'primary', 'danger');
+    confirmOk.classList.add('button', t === 'success' ? 'success' : t === 'primary' ? 'primary' : 'danger');
   }
 
   function fillConfirmBody(message, items) {
@@ -350,9 +366,14 @@
     }
     confirmLastFocus = document.activeElement;
     confirmTitle.textContent = title;
-    setConfirmButtonLabel(confirmCancel, opts.cancel || 'Отмена');
-    setConfirmButtonLabel(confirmOk, opts.ok || 'Подтвердить', opts.okIcon || opts.icon);
     setModalTone(opts.tone);
+    setConfirmButtonLabel(confirmCancel, opts.cancel || 'Отмена');
+    const okLabel = opts.ok || 'Подтвердить';
+    let expandExtra = '';
+    if (opts.okHover && opts.okHover !== okLabel) {
+      expandExtra = opts.okHover.startsWith(okLabel) ? opts.okHover.slice(okLabel.length) : opts.okHover;
+    }
+    setConfirmButtonLabel(confirmOk, okLabel, expandExtra ? null : (opts.okIcon || opts.icon), expandExtra);
     if (confirmIcon) confirmIcon.className = 'mdi ' + (opts.icon || 'mdi-alert-outline');
     fillConfirmBody(message, opts.items);
     confirmOnOk = onConfirm;
@@ -379,7 +400,9 @@
     openConfirm({
       title: form.dataset.confirmTitle || 'Подтверждение',
       message: form.dataset.confirmMessage || '',
+      cancel: form.dataset.confirmCancel || 'Отмена',
       ok: form.dataset.confirmOk || 'Подтвердить',
+      okHover: form.dataset.confirmOkHover || '',
       tone: form.dataset.confirmTone || 'danger',
       icon: form.dataset.confirmIcon || 'mdi-alert-outline',
       onConfirm: () => {

@@ -1370,6 +1370,38 @@
             pointer-events: auto;
         }
 
+        #confirmModalOk:has(.confirm-ok-extra) {
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        #confirmModalOk .confirm-ok-extra {
+            display: inline-grid;
+            grid-template-columns: 0fr;
+            opacity: 0;
+            transition:
+                grid-template-columns .28s ease,
+                opacity .18s ease;
+        }
+
+        #confirmModalOk .confirm-ok-extra > span {
+            overflow: hidden;
+            min-width: 0;
+            white-space: nowrap;
+        }
+
+        #confirmModalOk:hover .confirm-ok-extra,
+        #confirmModalOk:focus-visible .confirm-ok-extra {
+            grid-template-columns: 1fr;
+            opacity: 1;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            #confirmModalOk .confirm-ok-extra {
+                transition: none;
+            }
+        }
+
         .modal-footer {
             padding: 14px 18px;
 

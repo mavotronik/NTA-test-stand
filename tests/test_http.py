@@ -558,6 +558,9 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertIn("data-confirm", detail.text)
         self.assertIn("Удалить инстанс?", detail.text)
+        self.assertIn('data-confirm-ok="Да"', detail.text)
+        self.assertIn('data-confirm-cancel="Нет"', detail.text)
+        self.assertIn('data-confirm-ok-hover="Да, мне мама разрешила"', detail.text)
         self.assertNotIn("onsubmit=", detail.text)
 
     def test_build_run_htmx_opens_watch_and_live_partials(self):
