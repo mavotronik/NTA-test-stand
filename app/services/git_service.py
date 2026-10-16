@@ -96,6 +96,22 @@ def list_branches(repo: Path, policy: Policy, *, fetch: bool = True) -> list[str
     return sorted(set(branches))
 
 
+def _local_branch_name(branch: str) -> str:
+    branch = branch.strip()
+    if branch.startswith("origin/"):
+        return branch[len("origin/") :]
+    return branch
+
+
+def _peel_commit(repo: Path, ref: str) -> str:
+    sha = _run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"]
+    )
+    if len(sha) != 40:
+        raise GitError(f"invalid commit: {sha}")
+    return sha
+
+
 def resolve_instance_commit(repo: Path, inst: dict, policy: Policy) -> str:
     """Commit для сборки/деплоя: явный pin в git_commit или HEAD ветки."""
     pin = (inst.get("git_commit") or "").strip()
@@ -111,17 +127,22 @@ def resolve_instance_commit(repo: Path, inst: dict, policy: Policy) -> str:
     return resolve_commit(repo, branch, policy)
 
 
-def resolve_commit(repo: Path, branch: str, policy: Policy) -> str:
-    if not branch_allowed(policy, branch):
+def resolve_commit(repo: Path, branch: str, policy: Policy, *, fetch: bool = True) -> str:
+    local = _local_branch_name(branch)
+    if not branch_allowed(policy, local):
         raise GitError(f"branch not allowed: {branch}")
-    ref = branch if "/" in branch else f"origin/{branch}"
-    try:
-        sha = _run(["git", "-C", str(repo), "rev-parse", ref])
-    except GitError:
-        sha = _run(["git", "-C", str(repo), "rev-parse", branch])
-    if len(sha) != 40:
-        raise GitError(f"invalid commit: {sha}")
-    return sha
+    if fetch:
+        try:
+            _run(["git", "-C", str(repo), "fetch", "--prune"])
+        except GitError:
+            pass
+    last_err: GitError | None = None
+    for ref in (f"refs/remotes/origin/{local}", f"refs/heads/{local}"):
+        try:
+            return _peel_commit(repo, ref)
+        except GitError as err:
+            last_err = err
+    raise GitError(f"branch not found: {local}") from last_err
 
 
 def _same_commit(repo: Path, left: str, right: str) -> bool:
