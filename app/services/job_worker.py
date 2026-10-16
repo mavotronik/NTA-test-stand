@@ -7,12 +7,11 @@ from pathlib import Path
 from typing import Callable
 
 from app.config import Settings
-from app.crypto_util import decrypt_secret, get_fernet
 from app.db import Database, new_id, utc_now
 from app.repositories import delete_instance, mark_build_failed
 from app.services import git_service
 from app.services.docker_service import DockerService
-from app.services.instance_runtime import launch_instance_container
+from app.services.instance_runtime import instance_container_env, launch_instance_container
 from app.services.job_queue import LIFECYCLE_JOB_TYPES, pick_next_queued_job
 
 LogFn = Callable[[str, str], None]
@@ -449,12 +448,12 @@ class JobWorker:
                 raise RuntimeError("db profile disabled")
             repo = Path(self.settings.policy.git_remote_url)
             commit = git_service.resolve_instance_commit(repo, inst, self.settings.policy)
+            wt, _ctx, _df, bkey, _ui_dir = self._prepare_ui_build_context(repo, commit)
             pinned_image = (inst.get("image_tag") or "").strip()
             if pinned_image:
                 logs.append(f"using pinned image {pinned_image}")
                 image_for_run = pinned_image
             else:
-                _wt, _ctx, _df, bkey, _ui_dir = self._prepare_ui_build_context(repo, commit)
                 with self.db.connection() as conn:
                     build = conn.execute(
                         "SELECT * FROM builds WHERE build_key=? AND status='ready' ORDER BY created_at DESC LIMIT 1",
@@ -463,19 +462,24 @@ class JobWorker:
                 if not build:
                     raise RuntimeError("no ready build; queue build first or set image on instance")
                 image_for_run = build["image_tag"]
-            fernet = get_fernet(self.settings.fernet_key, self.settings.secret_key)
-            password = decrypt_secret(fernet, prof["password_enc"])
+            example = wt / "deploy" / "ui" / "env.example"
             version_date = utc_now()[:10]
-            env = {
-                "CLICKHOUSE_URL": f"{'https' if prof['tls'] else 'http'}://{prof['host']}:{prof['port']}",
-                "CLICKHOUSE_USER": prof["username"],
-                "CLICKHOUSE_PASSWORD": password,
-                "CLICKHOUSE_DATABASE": prof["database_name"],
-                "SESSION_COOKIE_SECURE": "false",
-                "GRAPES_VERSION": commit[:12],
-                "GRAPES_VERSION_DATE": version_date,
-                "GIT_COMMIT": commit,
-            }
+            env = instance_container_env(
+                self.settings,
+                inst,
+                prof,
+                example_path=example,
+                extra_env={
+                    "GRAPES_VERSION": commit[:12],
+                    "GRAPES_VERSION_DATE": version_date,
+                    "GIT_COMMIT": commit,
+                },
+            )
+            col_keys = [key for key in env if key.startswith("CH_COL_") or key == "CH_MAC_STORAGE"]
+            if example.is_file():
+                logs.append(f"ui mappings from {example.name}: {len(col_keys)} column keys")
+            else:
+                logs.append(f"WARNING: {example} missing; UI column defaults")
             name = f"grapes-test-{inst['slug']}"
             data_dir = self.settings.instance_ui_data_dir(inst["slug"])
             logs.append(f"ui data mount (host) {data_dir}")
