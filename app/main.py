@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app import auth
+from app.build_info import panel_build_info
 from app.auth import (
     authenticate,
     bootstrap_admin,
@@ -86,7 +87,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Test Stand Manager", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
-templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
+def _template_context(request: Request) -> dict[str, Any]:
+    return {"panel_build": panel_build_info()}
+
+
+templates = Jinja2Templates(
+    directory=str(APP_DIR / "templates"),
+    context_processors=[_template_context],
+)
 
 
 @app.exception_handler(HTTPException)

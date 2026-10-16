@@ -29,20 +29,30 @@
   </div>
 </header>
 <aside class="sidebar" id="sidebar">
-  <div class="sidebar-section">
+  <div class="sidebar-nav">
+    <div class="sidebar-section">
     <div class="sidebar-title">Основное</div>
     <a class="nav-item {% if active=='overview' %}active{% endif %}" href="/"><span class="mdi mdi-view-dashboard-outline"></span><span class="nav-label">Обзор</span></a>
     <a class="nav-item {% if active=='instances' %}active{% endif %}" href="/instances"><span class="mdi mdi-server-outline"></span><span class="nav-label">Инстансы</span></a>
     <a class="nav-item {% if active=='databases' %}active{% endif %}" href="/databases"><span class="mdi mdi-database-outline"></span><span class="nav-label">Базы данных</span></a>
     <a class="nav-item {% if active=='builds' %}active{% endif %}" href="/builds"><span class="mdi mdi-docker"></span><span class="nav-label">Сборки</span></a>
     <a class="nav-item {% if active=='deployments' %}active{% endif %}" href="/deployments"><span class="mdi mdi-rocket-launch-outline"></span><span class="nav-label">Развёртывания</span></a>
-  </div>
-  <div class="sidebar-section">
+    </div>
+    <div class="sidebar-section">
     <div class="sidebar-title">Система</div>
     <a class="nav-item {% if active=='audit' %}active{% endif %}" href="/audit"><span class="mdi mdi-file-document-outline"></span><span class="nav-label">Аудит</span></a>
     {% if user.role == 'admin' %}
     <a class="nav-item {% if active=='users' %}active{% endif %}" href="/users"><span class="mdi mdi-account-group-outline"></span><span class="nav-label">Пользователи</span></a>
     {% endif %}
+    </div>
+  </div>
+  <div class="sidebar-footer" title="Сборка {{ panel_build.built_at_iso or panel_build.built_at }} · {{ panel_build.commit or 'коммит неизвестен' }}">
+    <span class="mdi mdi-source-commit" aria-hidden="true"></span>
+    <span class="sidebar-build nav-label">
+      <span class="sidebar-build-label">Сборка</span>
+      <span class="sidebar-build-time">{{ panel_build.built_at }}</span>
+      <span class="sidebar-build-commit">{{ panel_build.commit_short }}</span>
+    </span>
   </div>
 </aside>
 <main class="main">

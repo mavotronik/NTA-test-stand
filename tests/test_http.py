@@ -72,6 +72,12 @@ class HttpTests(unittest.TestCase):
         r2 = self.client.get("/")
         self.assertEqual(r2.status_code, 200)
         self.assertIn("Обзор", r2.text)
+        from app.build_info import panel_build_info
+
+        info = panel_build_info()
+        self.assertIn("sidebar-footer", r2.text)
+        self.assertIn(info.built_at, r2.text)
+        self.assertIn(info.commit_short, r2.text)
 
     def _admin_csrf(self) -> str:
         r = self.client.get("/users")
