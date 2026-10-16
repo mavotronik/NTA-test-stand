@@ -1,0 +1,35 @@
+# NTA Test Stand Manager — процесс на хосте из .venv, без контейнера менеджера.
+#
+# Один раз:
+#   python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#   cp config.example.yaml config.yaml   # если config.yaml ещё нет
+#
+# Установка:
+#   sudo cp deploy/nta-test-stand.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nta-test-stand.service
+#
+# Логи: journalctl -u nta-test-stand -f
+# Порт и bind — manager.host / manager.port в config.yaml.
+
+[Unit]
+Description=NTA Test Stand Manager
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+SupplementaryGroups=docker
+WorkingDirectory=/opt/NTA-test-stand
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/NTA-test-stand/.venv/bin/python -m app
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+SyslogIdentifier=nta-test-stand
+
+[Install]
+WantedBy=multi-user.target
