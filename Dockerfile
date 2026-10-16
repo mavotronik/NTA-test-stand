@@ -19,7 +19,7 @@ COPY config.example.yaml ./config.example.yaml
 
 # Commit and image build time for the sidebar. .git stays in the build context only.
 RUN --mount=type=bind,from=context,source=.,target=/src,ro \
-    sh -c 'git -c safe.directory=* -C /src rev-parse HEAD > /app/.panel_commit 2>/dev/null || printf unknown > /app/.panel_commit; date -u +%Y-%m-%dT%H:%M:%SZ > /app/.panel_build_time'
+    sh -c 'git -c safe.directory=* -C /src rev-parse HEAD > /app/.panel_commit 2>/dev/null || printf unknown > /app/.panel_commit; git -c safe.directory=* -C /src remote get-url origin > /app/.panel_repo_url 2>/dev/null || printf unknown > /app/.panel_repo_url; date -u +%Y-%m-%dT%H:%M:%SZ > /app/.panel_build_time'
 
 EXPOSE 8080
 

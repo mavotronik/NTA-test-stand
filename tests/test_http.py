@@ -78,6 +78,9 @@ class HttpTests(unittest.TestCase):
         self.assertIn("sidebar-footer", r2.text)
         self.assertIn(info.built_at, r2.text)
         self.assertIn(info.commit_short, r2.text)
+        if info.repo_url:
+            self.assertIn(info.repo_url, r2.text)
+            self.assertIn(info.repo_name, r2.text)
 
     def _admin_csrf(self) -> str:
         r = self.client.get("/users")

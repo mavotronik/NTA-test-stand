@@ -332,6 +332,20 @@
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         }
 
+        .sidebar-repo {
+            overflow: hidden;
+
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-decoration: none;
+            text-overflow: ellipsis;
+        }
+
+        .sidebar-repo:hover {
+            color: var(--primary);
+            text-decoration: underline;
+        }
+
         /* =====================================================
            MAIN
         ===================================================== */

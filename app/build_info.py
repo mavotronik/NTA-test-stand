@@ -10,6 +10,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _STAMP_COMMIT = REPO_ROOT / ".panel_commit"
 _STAMP_BUILT = REPO_ROOT / ".panel_build_time"
+_STAMP_REPO = REPO_ROOT / ".panel_repo_url"
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,8 @@ class PanelBuild:
     commit_short: str
     built_at: str
     built_at_iso: str
+    repo_url: str
+    repo_name: str
 
 
 def format_built_at(raw: str) -> str:
@@ -31,6 +34,33 @@ def format_built_at(raw: str) -> str:
     if moment.tzinfo is None:
         moment = moment.astimezone()
     return moment.astimezone().strftime("%d.%m.%Y %H:%M")
+
+
+def browse_repo_url(remote: str) -> str:
+    """Turn a git remote into an https page, or "" when it is not a web URL."""
+    text = (remote or "").strip()
+    if not text or text == "unknown":
+        return ""
+    if text.startswith("git@"):
+        host, _, path = text[4:].partition(":")
+        if not host or not path:
+            return ""
+        text = f"https://{host}/{path}"
+    elif text.startswith("ssh://"):
+        rest = text[len("ssh://"):]
+        if rest.startswith("git@"):
+            rest = rest[4:]
+        text = "https://" + rest
+    elif not text.startswith(("http://", "https://")):
+        return ""
+    if text.endswith(".git"):
+        text = text[:-4]
+    return text.rstrip("/")
+
+
+def repo_name_from_url(url: str) -> str:
+    name = url.rstrip("/").rsplit("/", 1)[-1]
+    return name or url
 
 
 def _read_stamp(path: Path) -> str:
@@ -75,9 +105,16 @@ def panel_build_info() -> PanelBuild:
         or _read_stamp(_STAMP_BUILT)
         or _git("log", "-1", "--format=%cI")
     )
+    repo_url = browse_repo_url(
+        os.environ.get("PANEL_REPO_URL", "").strip()
+        or _read_stamp(_STAMP_REPO)
+        or _git("remote", "get-url", "origin")
+    )
     return PanelBuild(
         commit=commit,
         commit_short=commit[:12] if commit else "—",
         built_at=format_built_at(built_raw),
         built_at_iso=built_raw if built_raw and built_raw != "unknown" else "",
+        repo_url=repo_url,
+        repo_name=repo_name_from_url(repo_url) if repo_url else "",
     )
