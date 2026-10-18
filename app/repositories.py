@@ -96,6 +96,8 @@ def create_instance(
     db_profile_id: str,
     git_branch: str,
     user_id: str,
+    git_commit: str = "",
+    image_tag: str = "",
 ) -> str:
     iid = new_id()
     now = utc_now()
@@ -104,12 +106,24 @@ def create_instance(
             """
             INSERT INTO instances(
               id, slug, name, port, state, db_profile_id, git_branch,
+              git_commit, image_tag,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                iid, slug, name, port, "stopped", db_profile_id, git_branch,
-                user_id, user_id, now, now,
+                iid,
+                slug,
+                name,
+                port,
+                "stopped",
+                db_profile_id,
+                git_branch,
+                git_commit.strip(),
+                image_tag.strip(),
+                user_id,
+                user_id,
+                now,
+                now,
             ),
         )
         conn.execute(

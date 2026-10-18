@@ -510,11 +510,11 @@ class JobWorker:
             with self.db.connection() as conn:
                 conn.execute(
                     """
-                    UPDATE instances SET state='running', git_commit=?, image_tag=?, container_id=?,
+                    UPDATE instances SET state='running', container_id=?,
                       rollback_config_json=?, updated_at=?
                     WHERE id=?
                     """,
-                    (commit, image_for_run, cid, json.dumps({"port": inst["port"]}), utc_now(), instance_id),
+                    (cid, json.dumps({"port": inst["port"]}), utc_now(), instance_id),
                 )
             logs.flush()
             self._set_job(job_id, "done", "running")

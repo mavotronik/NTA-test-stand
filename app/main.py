@@ -653,6 +653,35 @@ async def instance_new_post(
     prof = get_db_profile(db, db_profile_id)
     if not prof or prof.get("disabled"):
         raise HTTPException(400, "invalid profile")
+    repo = Path(settings.policy.git_remote_url)
+    commit_pin = git_commit.strip()
+    if commit_pin:
+        try:
+            git_service.resolve_instance_commit(
+                repo,
+                {"git_commit": commit_pin, "git_branch": git_branch.strip()},
+                settings.policy,
+            )
+        except git_service.GitError as err:
+            ctx = _instance_form_ctx(
+                db,
+                settings,
+                form={
+                    "name": name.strip(),
+                    "slug": slug,
+                    "port": port,
+                    "db_profile_id": db_profile_id,
+                    "git_branch": git_branch.strip(),
+                    "git_commit": git_commit,
+                    "image_tag": image_tag,
+                },
+            )
+            return _render(
+                request,
+                "instance_form.html",
+                {"user": user, "active": "instances", "return_to": return_to, "error": str(err), **ctx},
+                status=400,
+            )
     iid = create_instance(
         db,
         slug=slug,
@@ -661,6 +690,8 @@ async def instance_new_post(
         db_profile_id=db_profile_id,
         git_branch=git_branch.strip(),
         user_id=user["id"],
+        git_commit=commit_pin,
+        image_tag=image_tag.strip(),
     )
     write_audit(
         db,

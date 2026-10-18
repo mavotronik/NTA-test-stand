@@ -37,9 +37,9 @@
   </select>
 </div>
 <div class="form-group">
-  <label class="form-label">Commit для сборки</label>
+  <label class="form-label">Commit для сборки (необязательно)</label>
   <input class="input" name="git_commit" placeholder="полный SHA или короткий; пусто — HEAD ветки" value="{{ form.git_commit or '' }}" autocomplete="off">
-  <p class="field-hint">Сборка и деплой без образа используют этот commit. После успешного деплоя сюда попадает фактический commit.</p>
+  <p class="field-hint">Сборка и деплой без образа используют этот commit. Пусто — HEAD выбранной ветки. Деплой не меняет поле автоматически.</p>
 </div>
 <div class="form-group">
   <label class="form-label">Docker-образ (необязательно)</label>
@@ -49,5 +49,5 @@
     <option value="{{ b.image_tag }}">{{ b.git_commit[:12] }} · {{ b.created_at }}</option>
     {% endfor %}
   </datalist>
-  <p class="field-hint">Если указан — «Развернуть» запускает этот образ без поиска сборки по commit. Пусто — нужна готовая сборка.</p>
+  <p class="field-hint">Если указан — «Развернуть» запускает этот образ без поиска сборки по commit. Пусто — нужна готовая сборка. Деплой не меняет поле автоматически.</p>
 </div>
