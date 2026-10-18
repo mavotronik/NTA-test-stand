@@ -1,4 +1,5 @@
 {% if error %}<p class="modal-form-error">{{ error }}</p>{% endif %}
+{% set src_mode = form.source_mode if form.source_mode is defined else (instance.source_mode if instance else 'repo') %}
 <div class="form-group"><label class="form-label">Имя</label><input class="input" name="name" required value="{{ form.name or '' }}"></div>
 <div class="form-group"><label class="form-label">Slug (a-z0-9-)</label>
   {% if instance %}
@@ -29,17 +30,39 @@
     {% endfor %}
   </select>
 </div>
-<div class="form-group"><label class="form-label">Git-ветка</label>
-  <select class="select" name="git_branch" required>
-    {% for b in branches %}
-    <option {% if form.git_branch==b %}selected{% endif %}>{{ b }}</option>
-    {% endfor %}
-  </select>
+<div class="form-group" id="instance-source-mode-group">
+  <span class="form-label">Источник UI</span>
+  <div class="instance-source-mode-options">
+    <label class="instance-source-mode-option">
+      <input type="radio" name="source_mode" value="repo"{% if src_mode != 'path' %} checked{% endif %}>
+      Из репозитория
+    </label>
+    <label class="instance-source-mode-option">
+      <input type="radio" name="source_mode" value="path"{% if src_mode == 'path' %} checked{% endif %}>
+      Пользовательский путь
+    </label>
+  </div>
 </div>
-<div class="form-group">
-  <label class="form-label">Commit для сборки (необязательно)</label>
-  <input class="input" name="git_commit" placeholder="полный SHA или короткий; пусто — HEAD ветки" value="{{ form.git_commit or '' }}" autocomplete="off">
-  <p class="field-hint">Сборка и деплой без образа используют этот commit. Пусто — HEAD выбранной ветки. Деплой не меняет поле автоматически.</p>
+<div id="instance-source-repo"{% if src_mode == 'path' %} hidden{% endif %}>
+  <div class="form-group"><label class="form-label">Git-ветка</label>
+    <select class="select" name="git_branch" id="instance-git-branch"{% if src_mode != 'path' %} required{% endif %}>
+      {% for b in branches %}
+      <option {% if form.git_branch==b %}selected{% endif %}>{{ b }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Commit для сборки (необязательно)</label>
+    <input class="input" name="git_commit" placeholder="полный SHA или короткий; пусто — HEAD ветки" value="{{ form.git_commit or '' }}" autocomplete="off">
+    <p class="field-hint">Сборка и деплой без образа используют этот commit. Пусто — HEAD выбранной ветки. Деплой не меняет поле автоматически.</p>
+  </div>
+</div>
+<div id="instance-source-path"{% if src_mode != 'path' %} hidden{% endif %}>
+  <div class="form-group">
+    <label class="form-label" for="instance-source-path-input">Каталог GrapesNTA</label>
+    <input class="input" id="instance-source-path-input" name="source_path" placeholder="/home/tester/GrapesNTA" value="{{ form.source_path or '' }}" autocomplete="off">
+    <p class="field-hint">Абсолютный путь на хосте. UI ищется автоматически (например deploy/ui). Репозиторий git не проверяется.</p>
+  </div>
 </div>
 <div class="form-group">
   <label class="form-label">Docker-образ (необязательно)</label>

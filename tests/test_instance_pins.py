@@ -8,7 +8,7 @@ from unittest import mock
 from app.db import Database, new_id, utc_now
 from app.deps import get_settings
 from app.repositories import create_instance, get_instance, queue_job, save_db_profile
-from app.services.job_worker import JobWorker
+from app.services.job_worker import JobWorker, _InstanceBuildContext
 
 from tests.test_http import _write_test_config
 
@@ -170,15 +170,22 @@ class DeployPreservesPinsTests(unittest.TestCase):
         wt = self._root / "wt"
         wt.mkdir()
         commit_full = "a" * 40
+        build_ctx = _InstanceBuildContext(
+            build_key="bkey",
+            context=wt,
+            dockerfile=wt / "Dockerfile",
+            compose_dir=wt,
+            env_example=wt / "env.example",
+            version_id=commit_full[:12],
+            build_git_commit=commit_full,
+            log_label="test",
+            image_tag="grapes-nta-test:aaaaaaaaaaaa",
+        )
         with (
-            mock.patch(
-                "app.services.job_worker.git_service.resolve_instance_commit",
-                return_value=commit_full,
-            ),
             mock.patch.object(
                 worker,
-                "_prepare_ui_build_context",
-                return_value=(wt, wt, wt / "Dockerfile", "bkey", wt),
+                "_resolve_instance_build_context",
+                return_value=build_ctx,
             ),
             mock.patch(
                 "app.services.job_worker.instance_container_env",

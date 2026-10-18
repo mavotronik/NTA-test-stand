@@ -8,6 +8,7 @@ from app.crypto_util import decrypt_secret, get_fernet
 from app.db import Database
 from app.repositories import get_db_profile
 from app.services import git_service
+from app.services.ui_source import UiSourceError, is_path_source, resolve_path_layout
 from app.services.docker_service import DockerService
 
 # Подключение и порт задаёт профиль БД и инстанс, не пример конфига UI.
@@ -57,7 +58,13 @@ def ui_mapping_env(example_path: Path | None) -> dict[str, str]:
 
 
 def ui_env_example_path(settings: Settings, inst: dict[str, Any]) -> Path | None:
-    """env.example с коммита инстанса; если worktree недоступен — из checkout."""
+    """env.example с коммита инстанса; для path — из указанного каталога."""
+    if is_path_source(inst):
+        try:
+            layout = resolve_path_layout(inst)
+            return layout.env_example
+        except UiSourceError:
+            return None
     repo = Path(settings.policy.git_remote_url)
     checkout = repo / "deploy" / "ui" / "env.example"
     try:

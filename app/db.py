@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 MIGRATION_SQL = """
 PRAGMA journal_mode=WAL;
@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS instances (
   db_profile_id TEXT NOT NULL REFERENCES db_profiles(id),
   git_branch TEXT NOT NULL,
   git_commit TEXT NOT NULL DEFAULT '',
+  source_mode TEXT NOT NULL DEFAULT 'repo',
+  source_path TEXT NOT NULL DEFAULT '',
   image_tag TEXT NOT NULL DEFAULT '',
   container_id TEXT NOT NULL DEFAULT '',
   config_version INTEGER NOT NULL DEFAULT 1,
@@ -179,16 +181,33 @@ class Database:
         finally:
             conn.close()
 
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(instances)").fetchall()}
+        if "source_mode" not in cols:
+            conn.execute(
+                "ALTER TABLE instances ADD COLUMN source_mode TEXT NOT NULL DEFAULT 'repo'"
+            )
+        if "source_path" not in cols:
+            conn.execute(
+                "ALTER TABLE instances ADD COLUMN source_path TEXT NOT NULL DEFAULT ''"
+            )
+
     def _init_schema(self) -> None:
         with self._schema_lock:
             with self.connection() as conn:
                 conn.executescript(MIGRATION_SQL)
+                self._migrate_schema(conn)
                 row = conn.execute(
                     "SELECT value FROM schema_meta WHERE key='version'"
                 ).fetchone()
                 if not row:
                     conn.execute(
                         "INSERT INTO schema_meta(key,value) VALUES('version',?)",
+                        (str(SCHEMA_VERSION),),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE schema_meta SET value=? WHERE key='version'",
                         (str(SCHEMA_VERSION),),
                     )
 

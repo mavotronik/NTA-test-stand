@@ -973,6 +973,20 @@
             margin-bottom: 18px;
         }
 
+        .instance-source-mode-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px 24px;
+        }
+
+        .instance-source-mode-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
         .form-label {
             display: block;
 

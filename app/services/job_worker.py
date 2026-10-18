@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -13,11 +14,31 @@ from app.services import git_service
 from app.services.docker_service import DockerService
 from app.services.instance_runtime import instance_container_env, launch_instance_container
 from app.services.job_queue import LIFECYCLE_JOB_TYPES, pick_next_queued_job
+from app.services.ui_source import (
+    build_key_for_path_layout,
+    is_path_source,
+    path_build_tag,
+    path_version_id,
+    resolve_path_layout,
+)
 
 LogFn = Callable[[str, str], None]
 
 _LOG_BATCH_MAX_LINES = 80
 _LOG_FLUSH_INTERVAL_SEC = 0.35
+
+
+@dataclass(frozen=True)
+class _InstanceBuildContext:
+    build_key: str
+    context: Path
+    dockerfile: Path
+    compose_dir: Path
+    env_example: Path | None
+    version_id: str
+    build_git_commit: str
+    log_label: str
+    image_tag: str
 
 
 def append_job_log(db: Database, job_id: str, line: str) -> None:
@@ -321,8 +342,26 @@ class JobWorker:
             return
         self._run_deploy(job)
 
-    def _prepare_ui_build_context(self, repo: Path, commit: str) -> tuple[Path, Path, Path, str, Path]:
+    def _resolve_instance_build_context(self, inst: dict) -> _InstanceBuildContext:
+        if is_path_source(inst):
+            layout = resolve_path_layout(inst)
+            bkey = build_key_for_path_layout(layout)
+            vid = path_version_id(bkey)
+            tag = path_build_tag(bkey)
+            return _InstanceBuildContext(
+                build_key=bkey,
+                context=layout.context,
+                dockerfile=layout.dockerfile,
+                compose_dir=layout.compose_dir,
+                env_example=layout.env_example,
+                version_id=vid,
+                build_git_commit=f"path:{vid}",
+                log_label=f"path source {inst.get('source_path')}",
+                image_tag=tag,
+            )
         pol = self.settings.policy
+        repo = Path(self.settings.policy.git_remote_url)
+        commit = git_service.resolve_instance_commit(repo, inst, self.settings.policy)
         wt = git_service.ensure_worktree(
             repo,
             self.settings.git_cache_dir,
@@ -338,7 +377,18 @@ class JobWorker:
         if not df.is_file():
             raise RuntimeError(f"Dockerfile missing: {df}")
         bkey = git_service.build_key_for_commit(commit, df, ctx)
-        return wt, ctx, df, bkey, ui_compose_dir
+        env_ex = wt / "deploy" / "ui" / "env.example"
+        return _InstanceBuildContext(
+            build_key=bkey,
+            context=ctx,
+            dockerfile=df,
+            compose_dir=ui_compose_dir,
+            env_example=env_ex if env_ex.is_file() else None,
+            version_id=commit[:12],
+            build_git_commit=commit,
+            log_label=f"commit {commit}",
+            image_tag=f"grapes-nta-test:{commit[:12]}",
+        )
 
     def _run_build(self, job: dict, *, defer_deploy: bool = False) -> None:
         job_id = job["id"]
@@ -346,7 +396,6 @@ class JobWorker:
         logs = JobLogBatcher(self.db, job_id)
         self._set_job(job_id, "running", "resolve_commit")
         try:
-            repo = Path(self.settings.policy.git_remote_url)
             with self.db.connection() as conn:
                 inst_row = conn.execute(
                     "SELECT * FROM instances WHERE id=?", (job["instance_id"],)
@@ -354,9 +403,11 @@ class JobWorker:
             if not inst_row:
                 raise RuntimeError("instance missing")
             inst = dict(inst_row)
-            commit = git_service.resolve_instance_commit(repo, inst, self.settings.policy)
-            logs.append(f"commit {commit}")
-            _wt, ctx, _df, bkey, ui_compose_dir = self._prepare_ui_build_context(repo, commit)
+            bc = self._resolve_instance_build_context(inst)
+            logs.append(bc.log_label)
+            ctx = bc.context
+            bkey = bc.build_key
+            ui_compose_dir = bc.compose_dir
             logs.append(f"context {ctx}")
             with self.db.connection() as conn:
                 existing = conn.execute(
@@ -373,7 +424,7 @@ class JobWorker:
                 return
             build_id = job.get("build_id") or new_id()
             active_build_id = build_id
-            tag = f"grapes-nta-test:{commit[:12]}"
+            tag = bc.image_tag
             self._set_job(job_id, "running", "docker_build", build_id=build_id)
             with self.db.connection() as conn:
                 conn.execute(
@@ -381,7 +432,7 @@ class JobWorker:
                     INSERT OR REPLACE INTO builds(id, build_key, git_commit, status, image_tag, created_at)
                     VALUES (?,?,?,?,?,?)
                     """,
-                    (build_id, bkey, commit, "building", tag, utc_now()),
+                    (build_id, bkey, bc.build_git_commit, "building", tag, utc_now()),
                 )
 
             def log_cb(line: str) -> None:
@@ -446,9 +497,8 @@ class JobWorker:
                 raise RuntimeError("profile missing")
             if prof["disabled"]:
                 raise RuntimeError("db profile disabled")
-            repo = Path(self.settings.policy.git_remote_url)
-            commit = git_service.resolve_instance_commit(repo, inst, self.settings.policy)
-            wt, _ctx, _df, bkey, _ui_dir = self._prepare_ui_build_context(repo, commit)
+            bc = self._resolve_instance_build_context(inst)
+            bkey = bc.build_key
             pinned_image = (inst.get("image_tag") or "").strip()
             if pinned_image:
                 logs.append(f"using pinned image {pinned_image}")
@@ -462,24 +512,29 @@ class JobWorker:
                 if not build:
                     raise RuntimeError("no ready build; queue build first or set image on instance")
                 image_for_run = build["image_tag"]
-            example = wt / "deploy" / "ui" / "env.example"
+            example = bc.env_example
             version_date = utc_now()[:10]
+            git_commit_env = (
+                bc.version_id
+                if is_path_source(inst)
+                else bc.build_git_commit
+            )
             env = instance_container_env(
                 self.settings,
                 inst,
                 prof,
                 example_path=example,
                 extra_env={
-                    "GRAPES_VERSION": commit[:12],
+                    "GRAPES_VERSION": bc.version_id,
                     "GRAPES_VERSION_DATE": version_date,
-                    "GIT_COMMIT": commit,
+                    "GIT_COMMIT": git_commit_env,
                 },
             )
             col_keys = [key for key in env if key.startswith("CH_COL_") or key == "CH_MAC_STORAGE"]
-            if example.is_file():
+            if example and example.is_file():
                 logs.append(f"ui mappings from {example.name}: {len(col_keys)} column keys")
             else:
-                logs.append(f"WARNING: {example} missing; UI column defaults")
+                logs.append("WARNING: env.example missing; UI column defaults")
             name = f"grapes-test-{inst['slug']}"
             data_dir = self.settings.instance_ui_data_dir(inst["slug"])
             logs.append(f"ui data mount (host) {data_dir}")

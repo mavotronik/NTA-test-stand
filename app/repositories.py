@@ -98,6 +98,8 @@ def create_instance(
     user_id: str,
     git_commit: str = "",
     image_tag: str = "",
+    source_mode: str = "repo",
+    source_path: str = "",
 ) -> str:
     iid = new_id()
     now = utc_now()
@@ -106,9 +108,9 @@ def create_instance(
             """
             INSERT INTO instances(
               id, slug, name, port, state, db_profile_id, git_branch,
-              git_commit, image_tag,
+              git_commit, source_mode, source_path, image_tag,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 iid,
@@ -119,6 +121,8 @@ def create_instance(
                 db_profile_id,
                 git_branch,
                 git_commit.strip(),
+                source_mode,
+                source_path.strip(),
                 image_tag.strip(),
                 user_id,
                 user_id,
@@ -147,13 +151,16 @@ def update_instance(
     git_commit: str,
     image_tag: str,
     user_id: str,
+    source_mode: str = "repo",
+    source_path: str = "",
 ) -> None:
     now = utc_now()
     with db.connection() as conn:
         conn.execute(
             """
             UPDATE instances SET
-              name=?, port=?, db_profile_id=?, git_branch=?, git_commit=?, image_tag=?,
+              name=?, port=?, db_profile_id=?, git_branch=?, git_commit=?,
+              source_mode=?, source_path=?, image_tag=?,
               updated_by=?, updated_at=?, config_version=config_version + 1
             WHERE id=?
             """,
@@ -163,6 +170,8 @@ def update_instance(
                 db_profile_id,
                 git_branch,
                 git_commit.strip(),
+                source_mode,
+                source_path.strip(),
                 image_tag.strip(),
                 user_id,
                 now,

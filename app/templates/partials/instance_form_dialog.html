@@ -3,7 +3,7 @@
   <div class="modal-header">
     <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-{% if instance %}pencil{% else %}plus{% endif %}"></span></div>
     <h2 class="modal-title" id="instanceFormTitle">{% if instance %}Изменение: {{ instance.name }}{% else %}Создание инстанса{% endif %}</h2>
-    {% with return_to="edit" if instance else "new", instance_id=instance.id if instance else "", form_class="modal-header-action" %}{% include "partials/git_pull_form.html" %}{% endwith %}
+    {% if show_git_pull|default(true) %}{% with return_to="edit" if instance else "new", instance_id=instance.id if instance else "", form_class="modal-header-action" %}{% include "partials/git_pull_form.html" %}{% endwith %}{% endif %}
     <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
   </div>
   <form method="post" action="{% if instance %}/instances/{{ instance.id }}/edit{% else %}/instances/new{% endif %}" id="instance-form">

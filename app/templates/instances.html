@@ -22,7 +22,7 @@
     <table>
       <thead><tr>
         {% if user.role in ('admin', 'operator') %}<th class="instances-col-check"><input type="checkbox" id="instances-select-all" title="Выбрать все" aria-label="Выбрать все"></th>{% endif %}
-        <th>Имя</th><th>Slug</th><th>Состояние</th><th>URL</th><th>БД</th><th>Ветка</th><th></th></tr></thead>
+        <th>Имя</th><th>Slug</th><th>Состояние</th><th>URL</th><th>БД</th><th>Источник</th><th></th></tr></thead>
       <tbody>
       {% for i in instances %}
       <tr>
@@ -34,7 +34,7 @@
         <td>{{ i.state }}</td>
         <td><a href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener">:{{ i.port }}</a></td>
         <td>{{ i.db_profile_name }}</td>
-        <td>{{ i.git_branch }}</td>
+        <td>{% if i.source_mode == 'path' %}<code title="{{ i.source_path }}">путь</code>{% else %}{{ i.git_branch }}{% endif %}</td>
         <td>
           <a class="button" href="/instances/{{ i.id }}"><span class="mdi mdi-eye-outline"></span> Детали</a>
           <a class="button" href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>

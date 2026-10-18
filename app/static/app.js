@@ -253,7 +253,35 @@
     }
     showConflict();
   }
+  function initInstanceSourceMode(root) {
+    const scope = root && root.querySelector ? root : document;
+    const form = scope.querySelector('#instance-form');
+    if (!form || form.dataset.sourceModeBound) return;
+    form.dataset.sourceModeBound = '1';
+    const repoPanel = form.querySelector('#instance-source-repo');
+    const pathPanel = form.querySelector('#instance-source-path');
+    const branchSelect = form.querySelector('#instance-git-branch');
+    const pathInput = form.querySelector('#instance-source-path-input');
+    function sync() {
+      const mode = form.querySelector('input[name="source_mode"]:checked')?.value || 'repo';
+      if (repoPanel) repoPanel.hidden = mode === 'path';
+      if (pathPanel) pathPanel.hidden = mode !== 'path';
+      if (branchSelect) {
+        if (mode === 'path') branchSelect.removeAttribute('required');
+        else branchSelect.setAttribute('required', '');
+      }
+      if (pathInput) {
+        if (mode === 'path') pathInput.setAttribute('required', '');
+        else pathInput.removeAttribute('required');
+      }
+    }
+    form.querySelectorAll('input[name="source_mode"]').forEach((el) => {
+      el.addEventListener('change', sync);
+    });
+    sync();
+  }
   initInstancePortInput(document.getElementById('instance-port'));
+  initInstanceSourceMode(document);
 
   const confirmOverlay = document.getElementById('confirmModal');
   const confirmDialog = confirmOverlay?.querySelector('.modal');
@@ -504,6 +532,7 @@
     if (target?.id === 'formModalInner') {
       openOverlay(document.getElementById('formModal'));
       initInstancePortInput(target.querySelector('#instance-port'));
+      initInstanceSourceMode(target);
       target.querySelector('input:not([disabled]), select, textarea')?.focus();
       return;
     }

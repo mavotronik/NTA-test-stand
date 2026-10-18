@@ -70,6 +70,7 @@ from app.repositories import (
 from app.services.audit import write_audit
 from app.services.clickhouse_check import check_clickhouse_connection
 from app.services import git_service
+from app.services.ui_source import UiSourceError, find_ui_layout, normalize_source_path
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -399,6 +400,47 @@ async def instances_page(request: Request, db: Database = Depends(get_db), setti
     )
 
 
+def _instance_form_source_mode(instance: dict | None, form: dict | None) -> str:
+    if form and form.get("source_mode"):
+        mode = str(form["source_mode"]).strip().lower()
+        return mode if mode in ("repo", "path") else "repo"
+    if instance:
+        mode = str(instance.get("source_mode") or "repo").strip().lower()
+        return mode if mode in ("repo", "path") else "repo"
+    return "repo"
+
+
+def _resolve_instance_source_fields(
+    settings,
+    *,
+    source_mode: str,
+    source_path: str,
+    git_branch: str,
+    git_commit: str,
+) -> tuple[str, str, str, str]:
+    mode = (source_mode or "repo").strip().lower()
+    if mode not in ("repo", "path"):
+        raise ValueError("неизвестный режим источника")
+    if mode == "path":
+        root = normalize_source_path(source_path)
+        find_ui_layout(root)
+        return "", "", "path", str(root)
+    branch = git_branch.strip()
+    if not branch:
+        raise ValueError("укажите Git-ветку")
+    if not branch_allowed(settings.policy, branch):
+        raise ValueError("ветка не разрешена политикой")
+    repo = Path(settings.policy.git_remote_url)
+    commit_pin = git_commit.strip()
+    if commit_pin:
+        git_service.resolve_instance_commit(
+            repo,
+            {"git_commit": commit_pin, "git_branch": branch},
+            settings.policy,
+        )
+    return branch, commit_pin, "repo", ""
+
+
 def _instance_form_ctx(
     db: Database,
     settings,
@@ -407,17 +449,25 @@ def _instance_form_ctx(
     form: dict | None = None,
     pull: bool = False,
 ) -> dict:
+    mode = _instance_form_source_mode(instance, form)
+    skip_git = mode == "path"
     repo = Path(settings.policy.git_remote_url)
     git_sync = ""
     git_sync_error = ""
     fetched = False
-    if pull:
+    if pull and not skip_git:
         try:
             git_sync = git_service.pull_repo(repo)
             fetched = True
         except git_service.GitError as err:
             git_sync_error = str(err)
-    branches = git_service.list_branches(repo, settings.policy, fetch=not fetched) or ["main"]
+    if skip_git:
+        try:
+            branches = git_service.list_branches(repo, settings.policy, fetch=False) or ["main"]
+        except git_service.GitError:
+            branches = ["main"]
+    else:
+        branches = git_service.list_branches(repo, settings.policy, fetch=not fetched) or ["main"]
     exclude_id = instance["id"] if instance else None
     occupied = list_occupied_ports(db, exclude_id=exclude_id)
     suggested = next_free_port(
@@ -435,6 +485,8 @@ def _instance_form_ctx(
             "git_branch": instance["git_branch"],
             "git_commit": instance.get("git_commit") or "",
             "image_tag": instance.get("image_tag") or "",
+            "source_mode": instance.get("source_mode") or "repo",
+            "source_path": instance.get("source_path") or "",
         }
     elif suggested is not None:
         base_form["port"] = suggested
@@ -458,6 +510,7 @@ def _instance_form_ctx(
         "instance": instance,
         "git_sync": git_sync,
         "git_sync_error": git_sync_error,
+        "show_git_pull": mode != "path",
     }
 
 
@@ -605,8 +658,10 @@ async def instance_new_post(
     slug: str = Form(...),
     port: int = Form(...),
     db_profile_id: str = Form(...),
-    git_branch: str = Form(...),
+    git_branch: str = Form(""),
     git_commit: str = Form(""),
+    source_mode: str = Form("repo"),
+    source_path: str = Form(""),
     image_tag: str = Form(""),
     return_to: str = Form(""),
     csrf_token: str = Form(""),
@@ -621,21 +676,20 @@ async def instance_new_post(
         raise HTTPException(400, "invalid slug")
     if port < settings.policy.port_min or port > settings.policy.port_max:
         raise HTTPException(400, "port out of range")
+    form_data = {
+        "name": name.strip(),
+        "slug": slug,
+        "port": port,
+        "db_profile_id": db_profile_id,
+        "git_branch": git_branch.strip(),
+        "git_commit": git_commit,
+        "image_tag": image_tag,
+        "source_mode": source_mode,
+        "source_path": source_path,
+    }
     owner = port_owner(db, port)
     if owner:
-        ctx = _instance_form_ctx(
-            db,
-            settings,
-            form={
-                "name": name.strip(),
-                "slug": slug,
-                "port": port,
-                "db_profile_id": db_profile_id,
-                "git_branch": git_branch.strip(),
-                "git_commit": git_commit,
-                "image_tag": image_tag,
-            },
-        )
+        ctx = _instance_form_ctx(db, settings, form=form_data)
         return _render(
             request,
             "instance_form.html",
@@ -648,50 +702,37 @@ async def instance_new_post(
             },
             status=409,
         )
-    if not branch_allowed(settings.policy, git_branch):
-        raise HTTPException(400, "branch not allowed")
     prof = get_db_profile(db, db_profile_id)
     if not prof or prof.get("disabled"):
         raise HTTPException(400, "invalid profile")
-    repo = Path(settings.policy.git_remote_url)
-    commit_pin = git_commit.strip()
-    if commit_pin:
-        try:
-            git_service.resolve_instance_commit(
-                repo,
-                {"git_commit": commit_pin, "git_branch": git_branch.strip()},
-                settings.policy,
-            )
-        except git_service.GitError as err:
-            ctx = _instance_form_ctx(
-                db,
-                settings,
-                form={
-                    "name": name.strip(),
-                    "slug": slug,
-                    "port": port,
-                    "db_profile_id": db_profile_id,
-                    "git_branch": git_branch.strip(),
-                    "git_commit": git_commit,
-                    "image_tag": image_tag,
-                },
-            )
-            return _render(
-                request,
-                "instance_form.html",
-                {"user": user, "active": "instances", "return_to": return_to, "error": str(err), **ctx},
-                status=400,
-            )
+    try:
+        branch, commit_pin, src_mode, src_path = _resolve_instance_source_fields(
+            settings,
+            source_mode=source_mode,
+            source_path=source_path,
+            git_branch=git_branch,
+            git_commit=git_commit,
+        )
+    except (ValueError, UiSourceError, git_service.GitError) as err:
+        ctx = _instance_form_ctx(db, settings, form=form_data)
+        return _render(
+            request,
+            "instance_form.html",
+            {"user": user, "active": "instances", "return_to": return_to, "error": str(err), **ctx},
+            status=400,
+        )
     iid = create_instance(
         db,
         slug=slug,
         name=name.strip(),
         port=port,
         db_profile_id=db_profile_id,
-        git_branch=git_branch.strip(),
+        git_branch=branch,
         user_id=user["id"],
         git_commit=commit_pin,
         image_tag=image_tag.strip(),
+        source_mode=src_mode,
+        source_path=src_path,
     )
     write_audit(
         db,
@@ -718,7 +759,8 @@ async def instance_edit_page(
     inst = get_instance(db, instance_id)
     if not inst:
         raise HTTPException(404)
-    ctx = _instance_form_ctx(db, settings, instance=inst, pull=True)
+    pull_git = (inst.get("source_mode") or "repo") != "path"
+    ctx = _instance_form_ctx(db, settings, instance=inst, pull=pull_git)
     return _render(
         request,
         "instance_form.html",
@@ -733,8 +775,10 @@ async def instance_edit_post(
     name: str = Form(...),
     port: int = Form(...),
     db_profile_id: str = Form(...),
-    git_branch: str = Form(...),
+    git_branch: str = Form(""),
     git_commit: str = Form(""),
+    source_mode: str = Form("repo"),
+    source_path: str = Form(""),
     image_tag: str = Form(""),
     return_to: str = Form(""),
     csrf_token: str = Form(""),
@@ -749,21 +793,19 @@ async def instance_edit_post(
         raise HTTPException(404)
     if port < settings.policy.port_min or port > settings.policy.port_max:
         raise HTTPException(400, "port out of range")
+    form_data = {
+        "name": name.strip(),
+        "port": port,
+        "db_profile_id": db_profile_id,
+        "git_branch": git_branch.strip(),
+        "git_commit": git_commit,
+        "image_tag": image_tag,
+        "source_mode": source_mode,
+        "source_path": source_path,
+    }
     owner = port_owner(db, port, exclude_id=instance_id)
     if owner:
-        ctx = _instance_form_ctx(
-            db,
-            settings,
-            instance=inst,
-            form={
-                "name": name.strip(),
-                "port": port,
-                "db_profile_id": db_profile_id,
-                "git_branch": git_branch.strip(),
-                "git_commit": git_commit,
-                "image_tag": image_tag,
-            },
-        )
+        ctx = _instance_form_ctx(db, settings, instance=inst, form=form_data)
         return _render(
             request,
             "instance_form.html",
@@ -776,50 +818,37 @@ async def instance_edit_post(
             },
             status=409,
         )
-    if not branch_allowed(settings.policy, git_branch):
-        raise HTTPException(400, "branch not allowed")
     prof = get_db_profile(db, db_profile_id)
     if not prof or prof.get("disabled"):
         raise HTTPException(400, "invalid profile")
-    repo = Path(settings.policy.git_remote_url)
-    commit_pin = git_commit.strip()
-    if commit_pin:
-        try:
-            git_service.resolve_instance_commit(
-                repo,
-                {"git_commit": commit_pin, "git_branch": git_branch.strip()},
-                settings.policy,
-            )
-        except git_service.GitError as err:
-            ctx = _instance_form_ctx(
-                db,
-                settings,
-                instance=inst,
-                form={
-                    "name": name.strip(),
-                    "port": port,
-                    "db_profile_id": db_profile_id,
-                    "git_branch": git_branch.strip(),
-                    "git_commit": git_commit,
-                    "image_tag": image_tag,
-                },
-            )
-            return _render(
-                request,
-                "instance_form.html",
-                {"user": user, "active": "instances", "return_to": return_to, "error": str(err), **ctx},
-                status=400,
-            )
+    try:
+        branch, commit_pin, src_mode, src_path = _resolve_instance_source_fields(
+            settings,
+            source_mode=source_mode,
+            source_path=source_path,
+            git_branch=git_branch,
+            git_commit=git_commit,
+        )
+    except (ValueError, UiSourceError, git_service.GitError) as err:
+        ctx = _instance_form_ctx(db, settings, instance=inst, form=form_data)
+        return _render(
+            request,
+            "instance_form.html",
+            {"user": user, "active": "instances", "return_to": return_to, "error": str(err), **ctx},
+            status=400,
+        )
     update_instance(
         db,
         instance_id,
         name=name.strip(),
         port=port,
         db_profile_id=db_profile_id,
-        git_branch=git_branch.strip(),
+        git_branch=branch,
         git_commit=commit_pin,
         image_tag=image_tag.strip(),
         user_id=user["id"],
+        source_mode=src_mode,
+        source_path=src_path,
     )
     write_audit(
         db,
