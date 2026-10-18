@@ -758,6 +758,100 @@ class HttpTests(unittest.TestCase):
         actions_html = task.text.split('id="instance-actions"', 1)[-1].split('id="instance-jobs-wrap"', 1)[0]
         self.assertNotRegex(actions_html, r'type="submit" disabled')
 
+    def test_local_vendor_assets_and_no_cdn(self):
+        base = self.client.get("/login")
+        self.assertEqual(base.status_code, 200)
+        self.assertIn("/static/vendor/mdi/materialdesignicons.min.css", base.text)
+        self.assertIn("/static/vendor/htmx.min.js", base.text)
+        self.assertNotIn("jsdelivr", base.text)
+        self.assertNotIn("unpkg.com", base.text)
+        for path in (
+            "/static/vendor/mdi/materialdesignicons.min.css",
+            "/static/vendor/mdi/materialdesignicons-webfont.woff2",
+            "/static/vendor/htmx.min.js",
+        ):
+            asset = self.client.get(path)
+            self.assertEqual(asset.status_code, 200, path)
+            self.assertGreater(len(asset.content), 100, path)
+
+    def test_modal_partials_are_lightweight(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        form = self.client.get("/partials/instances/new")
+        self.assertEqual(form.status_code, 200)
+        self.assertIn("js-form-modal-dialog", form.text)
+        self.assertNotIn("sidebar-nav", form.text)
+        self.assertLess(len(form.content), 25_000)
+
+        listing = self.client.get("/instances")
+        self.assertIn("/partials/instances/new", listing.text)
+        self.assertNotIn('hx-select=".js-form-modal-dialog"', listing.text)
+
+        deployments = self.client.get("/deployments")
+        if "log-modal" in deployments.text:
+            self.assertIn("/partials/deployments/", deployments.text)
+            self.assertNotIn('hx-select=".js-log-modal-dialog"', deployments.text)
+
+    def test_instances_list_live_rows_poll(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        page = self.client.get("/instances")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="instances-rows"', page.text)
+        self.assertIn("/partials/instances-rows", page.text)
+        self.assertIn("instancesRowRevs", page.text)
+
+    def test_instances_rows_partial_updates_state(self):
+        import json
+
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        from app.db import Database
+        from app.repositories import create_instance, instance_list_row_rev, list_users, save_db_profile
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="live-profile",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        iid = create_instance(
+            db,
+            slug="live-test",
+            name="Live",
+            port=3205,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+        )
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE instances SET state='stopped', image_tag='demo:latest' WHERE id=?",
+                (iid,),
+            )
+        from app.repositories import instances_for_list_template
+
+        revs = {row["id"]: row["row_rev"] for row in instances_for_list_template(db)}
+        stale = self.client.get("/partials/instances-rows", params={"revs": json.dumps(revs)})
+        self.assertEqual(stale.status_code, 204)
+
+        with db.connection() as conn:
+            conn.execute("UPDATE instances SET state='running' WHERE id=?", (iid,))
+            row = conn.execute("SELECT * FROM instances WHERE id=?", (iid,)).fetchone()
+        old_revs = json.dumps(revs)
+        fresh = self.client.get("/partials/instances-rows", params={"revs": old_revs})
+        self.assertEqual(fresh.status_code, 200)
+        self.assertIn(f"/instances/{iid}/stop", fresh.text)
+        self.assertNotIn(f"/instances/{iid}/start", fresh.text)
+        self.assertIn('data-instance-rev="' + instance_list_row_rev(dict(row), False) + '"', fresh.text)
+
 
 if __name__ == "__main__":
     unittest.main()

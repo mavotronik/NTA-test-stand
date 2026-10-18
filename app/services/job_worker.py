@@ -9,7 +9,7 @@ from typing import Callable
 
 from app.config import Settings
 from app.db import Database, new_id, utc_now
-from app.repositories import delete_instance, mark_build_failed
+from app.repositories import delete_instance, fail_orphan_running_jobs, mark_build_failed
 from app.services import git_service
 from app.services.docker_service import DockerService
 from app.services.instance_runtime import instance_container_env, launch_instance_container
@@ -100,6 +100,7 @@ class JobWorker:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        fail_orphan_running_jobs(self.db)
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="job-worker", daemon=True)
         self._thread.start()

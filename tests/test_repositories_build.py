@@ -7,6 +7,7 @@ from app.repositories import (
     create_instance,
     delete_db_profile,
     delete_instance,
+    fail_orphan_running_jobs,
     list_builds,
     reconcile_stale_builds,
     save_db_profile,
@@ -134,6 +135,98 @@ class BuildRepositoryTests(unittest.TestCase):
         with self.db.connection() as conn:
             n = conn.execute("SELECT COUNT(*) AS c FROM instances").fetchone()["c"]
         self.assertEqual(n, 0)
+
+    def test_delete_instance_with_completing_job_clears_jobs(self):
+        uid = new_id()
+        with self.db.connection() as conn:
+            uid = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
+        pid = save_db_profile(
+            self.db,
+            profile_id=None,
+            name="ch3",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        iid = create_instance(
+            self.db,
+            slug="z",
+            name="Z",
+            port=3103,
+            db_profile_id=pid,
+            git_branch="main",
+            user_id=uid,
+        )
+        jid = new_id()
+        now = utc_now()
+        with self.db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO deployment_jobs(id, instance_id, job_type, status, stage, created_at)
+                VALUES (?,?,?,?,?,?)
+                """,
+                (jid, iid, "instance_delete", "running", "stop", now),
+            )
+            conn.execute(
+                "INSERT INTO job_logs(job_id, line, created_at) VALUES (?,?,?)",
+                (jid, "removing", now),
+            )
+        delete_instance(self.db, iid, completing_job_id=jid)
+        with self.db.connection() as conn:
+            inst_n = conn.execute("SELECT COUNT(*) AS c FROM instances").fetchone()["c"]
+            jobs_n = conn.execute("SELECT COUNT(*) AS c FROM deployment_jobs").fetchone()["c"]
+            logs_n = conn.execute("SELECT COUNT(*) AS c FROM job_logs").fetchone()["c"]
+        self.assertEqual(inst_n, 0)
+        self.assertEqual(jobs_n, 0)
+        self.assertEqual(logs_n, 0)
+
+    def test_fail_orphan_running_jobs(self):
+        uid = new_id()
+        with self.db.connection() as conn:
+            uid = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
+        pid = save_db_profile(
+            self.db,
+            profile_id=None,
+            name="ch4",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        iid = create_instance(
+            self.db,
+            slug="orphan",
+            name="Orphan",
+            port=3104,
+            db_profile_id=pid,
+            git_branch="main",
+            user_id=uid,
+        )
+        jid = new_id()
+        now = utc_now()
+        with self.db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO deployment_jobs(id, instance_id, job_type, status, stage, created_at)
+                VALUES (?,?,?,?,?,?)
+                """,
+                (jid, iid, "instance_start", "running", "prepare", now),
+            )
+        changed = fail_orphan_running_jobs(self.db)
+        self.assertEqual(changed, 1)
+        with self.db.connection() as conn:
+            row = conn.execute("SELECT status, stage FROM deployment_jobs WHERE id=?", (jid,)).fetchone()
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["stage"], "orphaned")
 
 
 if __name__ == "__main__":

@@ -276,6 +276,36 @@ def update_profile_check(db: Database, profile_id: str, ok: bool, msg: str) -> N
 INSTANCE_ACTIVE_JOB_TYPES = BUILD_DEPLOY_JOB_TYPES + LIFECYCLE_JOB_TYPES
 
 
+def instance_ids_with_active_jobs(db: Database) -> set[str]:
+    placeholders = ",".join("?" * len(INSTANCE_ACTIVE_JOB_TYPES))
+    with db.connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT instance_id FROM deployment_jobs
+            WHERE status IN ('queued', 'running')
+              AND job_type IN ({placeholders})
+            """,
+            INSTANCE_ACTIVE_JOB_TYPES,
+        ).fetchall()
+    return {str(r["instance_id"]) for r in rows}
+
+
+def instance_list_row_rev(inst: dict[str, Any], has_active_job: bool) -> str:
+    image = (inst.get("image_tag") or "").strip()
+    return f"{inst['state']}|{image}|{1 if has_active_job else 0}"
+
+
+def instances_for_list_template(db: Database) -> list[dict[str, Any]]:
+    instances = list_instances(db)
+    active = instance_ids_with_active_jobs(db)
+    out: list[dict[str, Any]] = []
+    for inst in instances:
+        row = dict(inst)
+        row["row_rev"] = instance_list_row_rev(inst, inst["id"] in active)
+        out.append(row)
+    return out
+
+
 def get_instance_job(db: Database, instance_id: str, job_id: str) -> dict[str, Any] | None:
     with db.connection() as conn:
         row = conn.execute(
@@ -479,7 +509,28 @@ def delete_instance(
             ).fetchone()
         if active:
             raise ValueError("instance has active jobs")
+        job_rows = conn.execute(
+            "SELECT id FROM deployment_jobs WHERE instance_id=?",
+            (instance_id,),
+        ).fetchall()
+        for row in job_rows:
+            conn.execute("DELETE FROM job_logs WHERE job_id=?", (row["id"],))
+        conn.execute("DELETE FROM deployment_jobs WHERE instance_id=?", (instance_id,))
+        conn.execute("DELETE FROM instance_configs WHERE instance_id=?", (instance_id,))
         conn.execute("DELETE FROM instances WHERE id=?", (instance_id,))
+
+
+def fail_orphan_running_jobs(db: Database, *, reason: str = "worker restarted") -> int:
+    with db.connection() as conn:
+        cur = conn.execute(
+            """
+            UPDATE deployment_jobs
+            SET status='failed', stage='orphaned', finished_at=?, error=?
+            WHERE status='running'
+            """,
+            (utc_now(), reason),
+        )
+    return int(cur.rowcount)
 
 
 def list_job_log_rows(

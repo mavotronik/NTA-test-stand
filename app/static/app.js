@@ -150,6 +150,80 @@
     }
   });
 
+  const modalHtmlCache = new Map();
+
+  function modalHxLink(el) {
+    return el?.closest?.(
+      'a[hx-get][hx-target="#formModalInner"], a[hx-get][hx-target="#logModalInner"]',
+    );
+  }
+
+  function modalOverlayForTarget(targetId) {
+    if (targetId === 'formModalInner') return document.getElementById('formModal');
+    if (targetId === 'logModalInner') return document.getElementById('logModal');
+    return null;
+  }
+
+  function showModalLoadingPlaceholder(inner) {
+    if (!inner || inner.querySelector('.js-form-modal-dialog, .js-log-modal-dialog')) return;
+    inner.innerHTML =
+      '<div class="modal modal-loading-placeholder" aria-busy="true" aria-label="Загрузка"><span class="mdi mdi-infinity modal-loading-spinner" aria-hidden="true"></span></div>';
+  }
+
+  function initFormModalInner(inner) {
+    if (!inner) return;
+    openOverlay(document.getElementById('formModal'));
+    initInstancePortInput(inner.querySelector('#instance-port'));
+    initInstanceSourceMode(inner);
+    inner.querySelector('input:not([disabled]), select, textarea')?.focus();
+  }
+
+  function initLogModalInner(inner) {
+    if (!inner) return;
+    openOverlay(document.getElementById('logModal'));
+    initInstanceJobWatch(instanceJobWatchRoot());
+    inner.querySelectorAll('.job-log-autoscroll').forEach(initJobLogAutoscrollToggle);
+    inner.querySelectorAll('.instance-auto-open-ui').forEach(initInstanceAutoOpenUi);
+    inner.querySelectorAll('.job-log-pre').forEach((pre) => {
+      if (jobLogAutoscrollEnabled(pre)) scrollJobLogToBottom(pre);
+    });
+  }
+
+  function prefetchModalHtml(url) {
+    if (!url || modalHtmlCache.has(url)) return;
+    fetch(url, { credentials: 'same-origin', headers: { Accept: 'text/html' } })
+      .then((resp) => (resp.ok ? resp.text() : ''))
+      .then((html) => {
+        if (html) modalHtmlCache.set(url, html);
+      })
+      .catch(() => {});
+  }
+
+  document.body.addEventListener(
+    'pointerenter',
+    (e) => {
+      const link = modalHxLink(e.target);
+      if (!link) return;
+      prefetchModalHtml(link.getAttribute('hx-get') || '');
+    },
+    { passive: true },
+  );
+
+  document.body.addEventListener(
+    'click',
+    (e) => {
+      const link = modalHxLink(e.target);
+      if (!link) return;
+      const targetId = link.getAttribute('hx-target')?.replace(/^#/, '');
+      const inner = targetId ? document.getElementById(targetId) : null;
+      const overlay = modalOverlayForTarget(targetId);
+      if (!inner || !overlay) return;
+      openOverlay(overlay);
+      showModalLoadingPlaceholder(inner);
+    },
+    true,
+  );
+
   function openOverlay(overlay) {
     if (!overlay) return;
     overlay.classList.add('visible');
@@ -411,6 +485,31 @@
     (focusBtn || confirmCancel)?.focus();
   }
 
+  function submitConfirmedForm(form) {
+    const clone = document.createElement('form');
+    clone.method = form.method || 'post';
+    clone.action = form.action;
+    clone.style.display = 'none';
+    if (form.enctype) clone.enctype = form.enctype;
+    form.querySelectorAll('input, select, textarea').forEach((el) => {
+      if (!el.name || el.disabled) return;
+      if (el instanceof HTMLInputElement && (el.type === 'submit' || el.type === 'button')) return;
+      const field = document.createElement('input');
+      field.type = 'hidden';
+      field.name = el.name;
+      if (el instanceof HTMLSelectElement) {
+        field.value = el.options[el.selectedIndex]?.value ?? '';
+      } else if (el instanceof HTMLTextAreaElement) {
+        field.value = el.value;
+      } else {
+        field.value = el.value;
+      }
+      clone.appendChild(field);
+    });
+    document.body.appendChild(clone);
+    clone.submit();
+  }
+
   confirmOk?.addEventListener('click', () => {
     const fn = confirmOnOk;
     closeConfirm();
@@ -420,10 +519,6 @@
   document.addEventListener('submit', (e) => {
     const form = e.target;
     if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-confirm')) return;
-    if (form.dataset.confirmAccepted === '1') {
-      delete form.dataset.confirmAccepted;
-      return;
-    }
     e.preventDefault();
     openConfirm({
       title: form.dataset.confirmTitle || 'Подтверждение',
@@ -433,13 +528,18 @@
       okHover: form.dataset.confirmOkHover || '',
       tone: form.dataset.confirmTone || 'danger',
       icon: form.dataset.confirmIcon || 'mdi-alert-outline',
-      onConfirm: () => {
-        form.dataset.confirmAccepted = '1';
-        if (typeof form.requestSubmit === 'function') form.requestSubmit();
-        else form.submit();
-      },
+      onConfirm: () => submitConfirmedForm(form),
     });
   });
+
+  window.instancesRowRevs = function instancesRowRevs() {
+    const rows = document.querySelectorAll('#instances-rows tr[data-instance-id]');
+    const revs = {};
+    rows.forEach((tr) => {
+      revs[tr.dataset.instanceId] = tr.dataset.instanceRev || '';
+    });
+    return JSON.stringify(revs);
+  };
 
   const BULK_COPY = {
     start: {
@@ -466,6 +566,9 @@
   };
 
   const bulkForm = document.getElementById('instances-bulk-form');
+  const instancesRowsBody = document.getElementById('instances-rows');
+  const bulkSelectedIds = new Set();
+  let restoreBulkChecks = () => {};
   if (bulkForm) {
     const actionInput = document.getElementById('instances-bulk-action');
     const selectAll = document.getElementById('instances-select-all');
@@ -484,11 +587,29 @@
       }
     }
 
-    rowChecks().forEach((cb) => cb.addEventListener('change', syncBulkUi));
+    restoreBulkChecks = function restoreBulkChecksImpl() {
+      rowChecks().forEach((cb) => {
+        cb.checked = bulkSelectedIds.has(cb.value);
+      });
+      syncBulkUi();
+    };
+
+    if (instancesRowsBody) {
+      instancesRowsBody.addEventListener('change', (evt) => {
+        const target = evt.target;
+        if (!(target instanceof HTMLInputElement) || !target.classList.contains('instances-row-check')) return;
+        if (target.checked) bulkSelectedIds.add(target.value);
+        else bulkSelectedIds.delete(target.value);
+        syncBulkUi();
+      });
+    }
+
     if (selectAll) {
       selectAll.addEventListener('change', () => {
         rowChecks().forEach((cb) => {
           cb.checked = selectAll.checked;
+          if (selectAll.checked) bulkSelectedIds.add(cb.value);
+          else bulkSelectedIds.delete(cb.value);
         });
         syncBulkUi();
       });
@@ -515,35 +636,51 @@
         });
       });
     });
-    syncBulkUi();
+    restoreBulkChecks();
   }
 
   document.body.addEventListener('htmx:beforeRequest', (evt) => {
     const target = evt.detail.target;
-    if (target?.id === 'formModalInner') openOverlay(document.getElementById('formModal'));
     const verb = (evt.detail.requestConfig?.verb || 'get').toLowerCase();
+    if (target?.id === 'formModalInner') {
+      openOverlay(document.getElementById('formModal'));
+      if (verb === 'get') showModalLoadingPlaceholder(target);
+    }
     if (target?.id === 'logModalInner' && verb === 'get') {
       openOverlay(document.getElementById('logModal'));
+      showModalLoadingPlaceholder(target);
+    }
+    const url = evt.detail.pathInfo?.requestPath;
+    if (
+      url
+      && target
+      && (target.id === 'formModalInner' || target.id === 'logModalInner')
+      && verb === 'get'
+      && modalHtmlCache.has(url)
+    ) {
+      evt.preventDefault();
+      target.innerHTML = modalHtmlCache.get(url);
+      if (typeof htmx !== 'undefined') htmx.process(target);
+      if (target.id === 'formModalInner') initFormModalInner(target);
+      else initLogModalInner(target);
     }
   });
 
   document.body.addEventListener('htmx:afterSwap', (evt) => {
     const target = evt.detail.target;
+    if (target?.id === 'instances-rows') {
+      restoreBulkChecks();
+    }
     if (target?.id === 'formModalInner') {
-      openOverlay(document.getElementById('formModal'));
-      initInstancePortInput(target.querySelector('#instance-port'));
-      initInstanceSourceMode(target);
-      target.querySelector('input:not([disabled]), select, textarea')?.focus();
+      const url = evt.detail.pathInfo?.requestPath;
+      if (url && target.innerHTML) modalHtmlCache.set(url, target.innerHTML);
+      initFormModalInner(target);
       return;
     }
     if (target?.id === 'logModalInner') {
-      openOverlay(document.getElementById('logModal'));
-      initInstanceJobWatch(instanceJobWatchRoot());
-      target.querySelectorAll('.job-log-autoscroll').forEach(initJobLogAutoscrollToggle);
-      target.querySelectorAll('.instance-auto-open-ui').forEach(initInstanceAutoOpenUi);
-      target.querySelectorAll('.job-log-pre').forEach((pre) => {
-        if (jobLogAutoscrollEnabled(pre)) scrollJobLogToBottom(pre);
-      });
+      const url = evt.detail.pathInfo?.requestPath;
+      if (url && target.innerHTML) modalHtmlCache.set(url, target.innerHTML);
+      initLogModalInner(target);
       return;
     }
     if (target?.id !== 'instance-job-status') return;

@@ -1,0 +1,35 @@
+{% for i in instances %}
+<tr data-instance-id="{{ i.id }}" data-instance-rev="{{ i.row_rev }}">
+  {% if user.role in ('admin', 'operator') %}
+  <td class="instances-col-check"><input type="checkbox" form="instances-bulk-form" class="instances-row-check" name="instance_ids" value="{{ i.id }}" data-instance-name="{{ i.name }}" aria-label="Выбрать {{ i.name }}"></td>
+  {% endif %}
+  <td>{{ i.name }}</td>
+  <td>{{ i.slug }}</td>
+  <td>{{ i.state }}</td>
+  <td><a href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener">:{{ i.port }}</a></td>
+  <td>{{ i.db_profile_name }}</td>
+  <td>{% if i.source_mode == 'path' %}<code title="{{ i.source_path }}">путь</code>{% else %}{{ i.git_branch }}{% endif %}</td>
+  <td>
+    <a class="button" href="/instances/{{ i.id }}"><span class="mdi mdi-eye-outline"></span> Детали</a>
+    <a class="button" href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
+    {% if user.role in ('admin', 'operator') %}
+    {% with url="/partials/instances/" ~ i.id ~ "/edit?return_to=instances", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
+    {% if i.state == 'running' %}
+    <form method="post" action="/instances/{{ i.id }}/stop" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <input type="hidden" name="return_to" value="instances">
+      <button class="button danger" type="submit"><span class="mdi mdi-stop"></span> Остановить</button>
+    </form>
+    {% else %}
+    <form method="post" action="/instances/{{ i.id }}/start" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <input type="hidden" name="return_to" value="instances">
+      <button class="button success" type="submit"{% if i.state == 'deploying' or not i.image_tag %} disabled title="{% if i.state == 'deploying' %}Идёт развёртывание{% else %}Нет образа для запуска{% endif %}"{% endif %}><span class="mdi mdi-play"></span> Запустить</button>
+    </form>
+    {% endif %}
+    {% endif %}
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="{% if user.role in ('admin', 'operator') %}8{% else %}7{% endif %}">Пока нет инстансов</td></tr>
+{% endfor %}

@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
   <div><h1 class="page-title">Профили ClickHouse</h1></div>
-  <div class="page-actions">{% if user.role in ('admin', 'operator') %}{% with url="/databases/new", label="Добавить", icon="mdi-plus", extra_class="button primary" %}{% include "partials/form_modal_link.html" %}{% endwith %}{% endif %}</div>
+  <div class="page-actions">{% if user.role in ('admin', 'operator') %}{% with url="/partials/databases/new", label="Добавить", icon="mdi-plus", extra_class="button primary" %}{% include "partials/form_modal_link.html" %}{% endwith %}{% endif %}</div>
 </div>
 {% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
 {% if error %}<p style="color:var(--danger);">{{ error }}</p>{% endif %}
@@ -19,7 +19,7 @@
         <td>{{ p.database_name }}</td>
         <td>{% if p.last_check_ok %}<span class="status"><span class="status-dot status-online"></span>OK</span>{% elif p.last_check_at %}<span class="status"><span class="status-dot status-offline"></span>fail</span>{% else %}—{% endif %}</td>
         <td>
-          {% with url="/databases/" ~ p.id ~ "/edit", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
+          {% with url="/partials/databases/" ~ p.id ~ "/edit", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
           <form method="post" action="/databases/{{ p.id }}/test" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
             <button class="button" type="submit"><span class="mdi mdi-lan-check"></span> Проверить</button>

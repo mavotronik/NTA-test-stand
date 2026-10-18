@@ -1216,6 +1216,32 @@
             pointer-events: auto;
         }
 
+        .modal-loading-placeholder {
+            min-height: 160px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+        }
+
+        .modal-loading-spinner {
+            font-size: 2.25rem;
+            line-height: 1;
+            animation: modal-loading-spin 1.1s linear infinite;
+        }
+
+        @keyframes modal-loading-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .modal-loading-spinner {
+                animation: none;
+            }
+        }
+
         .modal {
             width: 100%;
             max-width: 440px;

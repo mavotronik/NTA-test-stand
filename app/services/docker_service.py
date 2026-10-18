@@ -361,7 +361,13 @@ class DockerService:
     def stop_remove(self, name: str) -> None:
         try:
             c = self.client.containers.get(name)
+        except NotFound:
+            return
+        try:
             c.stop(timeout=15)
+        except Exception:
+            pass
+        try:
             c.remove(force=True)
         except NotFound:
             pass

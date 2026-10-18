@@ -49,6 +49,7 @@ from app.repositories import (
     list_audit,
     list_builds,
     list_db_profiles,
+    instances_for_list_template,
     list_instances,
     list_job_log_rows,
     list_jobs,
@@ -307,6 +308,131 @@ def partial_host_metrics(request: Request, metrics=Depends(get_metrics), setting
     )
 
 
+def _parse_instance_revs_json(raw: str) -> dict[str, str]:
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(key): str(value) for key, value in parsed.items()}
+
+
+@app.get("/partials/instances-rows", response_class=HTMLResponse)
+async def partial_instances_rows(
+    request: Request,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    instances = instances_for_list_template(db)
+    server_revs = {row["id"]: row["row_rev"] for row in instances}
+    client_revs = _parse_instance_revs_json(request.query_params.get("revs", ""))
+    if client_revs == server_revs:
+        return Response(status_code=204)
+    return _render(
+        request,
+        "partials/instances_rows.html",
+        {"user": user, "instances": instances},
+    )
+
+
+@app.get("/partials/instances/new", response_class=HTMLResponse)
+async def partial_instance_new_form(
+    request: Request,
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    ctx = _instance_form_ctx(db, settings, pull=True)
+    return _render(
+        request,
+        "partials/instance_form_dialog.html",
+        {"user": user, **_form_flash(request), **ctx},
+    )
+
+
+@app.get("/partials/instances/{instance_id}/edit", response_class=HTMLResponse)
+async def partial_instance_edit_form(
+    request: Request,
+    instance_id: str,
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    pull_git = (inst.get("source_mode") or "repo") != "path"
+    ctx = _instance_form_ctx(db, settings, instance=inst, pull=pull_git)
+    return _render(
+        request,
+        "partials/instance_form_dialog.html",
+        {
+            "user": user,
+            "return_to": request.query_params.get("return_to", ""),
+            **_form_flash(request),
+            **ctx,
+        },
+    )
+
+
+@app.get("/partials/databases/new", response_class=HTMLResponse)
+async def partial_database_new_form(request: Request, user=Depends(current_user)):
+    require_role(user, "operator")
+    return _render(
+        request,
+        "partials/database_form_dialog.html",
+        {"user": user, "profile": None},
+    )
+
+
+@app.get("/partials/databases/{profile_id}/edit", response_class=HTMLResponse)
+async def partial_database_edit_form(
+    request: Request,
+    profile_id: str,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    prof = get_db_profile(db, profile_id)
+    if not prof:
+        raise HTTPException(404)
+    return _render(
+        request,
+        "partials/database_form_dialog.html",
+        {"user": user, "profile": prof},
+    )
+
+
+@app.get("/partials/deployments/{job_id}/log-modal", response_class=HTMLResponse)
+async def partial_deployment_log_modal(
+    request: Request,
+    job_id: str,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    with db.connection() as conn:
+        job = conn.execute("SELECT * FROM deployment_jobs WHERE id=?", (job_id,)).fetchone()
+    if not job:
+        raise HTTPException(404)
+    log_rows = list_job_log_rows(db, job_id)
+    return _render(
+        request,
+        "partials/job_log_modal_dialog.html",
+        {
+            "user": user,
+            "job": dict(job),
+            "log_rows": log_rows,
+            "job_type_labels": JOB_TYPE_LABELS,
+        },
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, user=Depends(optional_user)):
     if user:
@@ -393,7 +519,7 @@ async def instances_page(request: Request, db: Database = Depends(get_db), setti
         {
             "user": user,
             "active": "instances",
-            "instances": list_instances(db),
+            "instances": instances_for_list_template(db),
             "message": message,
             "error": error,
         },

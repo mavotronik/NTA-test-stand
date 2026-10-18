@@ -9,7 +9,7 @@
   <div class="page-actions">
     {% if user.role in ('admin', 'operator') %}
     {% if instance.source_mode != 'path' %}{% with return_to="detail", instance_id=instance.id %}{% include "partials/git_pull_form.html" %}{% endwith %}{% endif %}
-    {% with url="/instances/" ~ instance.id ~ "/edit?return_to=detail", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
+    {% with url="/partials/instances/" ~ instance.id ~ "/edit?return_to=detail", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
     {% endif %}
     <a class="button" href="http://{{ public_host }}:{{ instance.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
   </div>
