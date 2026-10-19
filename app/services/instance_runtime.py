@@ -9,6 +9,10 @@ from app.db import Database
 from app.repositories import get_db_profile
 from app.services import git_service
 from app.services.ui_source import UiSourceError, is_path_source, resolve_path_layout
+from app.services.component_versions import (
+    build_instance_version_extra_env,
+    write_instance_component_versions,
+)
 from app.services.docker_service import DockerService
 
 # Подключение и порт задаёт профиль БД и инстанс, не пример конфига UI.
@@ -126,15 +130,24 @@ def launch_instance_container(
     prof = get_db_profile(db, inst["db_profile_id"], include_secret=True)
     if not prof:
         raise RuntimeError("profile missing")
+    version_env = build_instance_version_extra_env(settings, inst)
+    if extra_env:
+        version_env.update(extra_env)
+    name = f"grapes-test-{inst['slug']}"
+    data_dir = settings.instance_ui_data_dir(inst["slug"])
+    write_instance_component_versions(
+        data_dir,
+        docker,
+        ui_version=version_env["GRAPES_VERSION"],
+        ui_version_date=version_env.get("GRAPES_VERSION_DATE", ""),
+    )
     env = instance_container_env(
         settings,
         inst,
         prof,
         example_path=example_path,
-        extra_env=extra_env,
+        extra_env=version_env,
     )
-    name = f"grapes-test-{inst['slug']}"
-    data_dir = settings.instance_ui_data_dir(inst["slug"])
     cid = docker.run_instance_container(
         name=name,
         image=image,

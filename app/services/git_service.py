@@ -275,3 +275,39 @@ def build_key_for_commit(
         parts.append(hashlib.sha256(lock.read_bytes()).hexdigest()[:16])
     parts.append(extra)
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
+
+
+def component_version(repo: Path, component: str, *, tree: Path | None = None) -> str:
+    """Версия компонента как scripts/component-version.sh (дерево = worktree или checkout)."""
+    root = (tree or repo).resolve()
+    script = root / "scripts" / "component-version.sh"
+    if not script.is_file():
+        script = repo / "scripts" / "component-version.sh"
+    if not script.is_file():
+        return f"{component}-unknown"
+    try:
+        out = _run(["bash", str(script.resolve()), component], cwd=root)
+        return out.strip() or f"{component}-unknown"
+    except GitError:
+        return f"{component}-unknown"
+
+
+def version_date_for_component_version(repo: Path, version: str) -> str:
+    """Дата коммита метки версии (как component_version_date в deploy.sh)."""
+    v = (version or "").strip()
+    if not v or v.endswith("-unknown"):
+        return ""
+    tag = v.split("+", 1)[0]
+    try:
+        return _run(["git", "-C", str(repo), "log", "-1", "--format=%cI", f"refs/tags/{tag}"])
+    except GitError:
+        return ""
+
+
+def commit_iso_date(repo: Path, commit: str) -> str:
+    if not (commit or "").strip():
+        return ""
+    try:
+        return _run(["git", "-C", str(repo), "log", "-1", "--format=%cI", commit.strip()])
+    except GitError:
+        return ""

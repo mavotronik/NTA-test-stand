@@ -257,10 +257,12 @@ class DeployPreservesPinsTests(unittest.TestCase):
             ),
             mock.patch(
                 "app.services.job_worker.instance_container_env",
-                return_value={"PORT": "3100"},
+                return_value={"PORT": "3100", "CH_COL_SRC_ASN": "src_asn"},
             ),
-            mock.patch.object(worker.docker, "run_instance_container", return_value="0123456789ab"),
-            mock.patch.object(worker.docker, "wait_health_http", return_value=True),
+            mock.patch(
+                "app.services.job_worker.launch_instance_container",
+                return_value=("0123456789ab", True),
+            ),
         ):
             worker._run_deploy({"id": jid, "instance_id": iid})
         inst = get_instance(self.db, iid)

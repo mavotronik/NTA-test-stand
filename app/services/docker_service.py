@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tarfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -20,6 +21,47 @@ UI_APP_GID = 1001
 
 COMPOSE_UI_BUILD_MAX_ATTEMPTS = 3
 COMPOSE_UI_BUILD_RETRY_DELAY_SEC = 5
+
+# Имена контейнеров GrapesNTA на хосте (deploy/*/docker-compose.yml).
+HOST_COMPONENT_CONTAINERS: dict[str, str] = {
+    "grapes-worker": "worker",
+    "grapes-detection": "detection",
+    "grapes-enrichment": "enrichment",
+}
+
+
+@dataclass(frozen=True)
+class ComponentVersionRow:
+    version: str
+    version_date: str
+    deployed_at: str
+
+
+def _parse_container_env_list(env_list: Iterable[str] | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for item in env_list or []:
+        if not item or "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        out[key] = value
+    return out
+
+
+def _iso_deployed_at(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    if text.endswith("Z"):
+        return text.replace(".000000000", "").replace(".000000", "")
+    if "+" in text[10:] or text.endswith("+00:00"):
+        try:
+            from datetime import datetime, timezone
+
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return dt.astimezone(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            return text
+    return text
 
 
 def ui_compose_build_uses_host_network(compose_file: Path, service: str = "grapes-nta") -> bool:
@@ -413,3 +455,25 @@ class DockerService:
                     "image": (c.image.tags[0] if c.image.tags else c.image.short_id),
                 })
         return sorted(out, key=lambda x: x["name"])
+
+    def read_host_component_versions(self) -> dict[str, ComponentVersionRow]:
+        """Версии worker/detection/enrichment из env запущенных контейнеров хоста."""
+        out: dict[str, ComponentVersionRow] = {}
+        for container_name, component_id in HOST_COMPONENT_CONTAINERS.items():
+            c = self.get_container(container_name)
+            if not c:
+                continue
+            c.reload()
+            env_map = _parse_container_env_list(c.attrs.get("Config", {}).get("Env"))
+            version = (env_map.get("GRAPES_VERSION") or "").strip()
+            if not version or version == "unknown" or version.endswith("-unknown"):
+                continue
+            version_date = (env_map.get("GRAPES_VERSION_DATE") or "").strip()
+            started = (c.attrs.get("State") or {}).get("StartedAt") or ""
+            deployed_at = _iso_deployed_at(started)
+            out[component_id] = ComponentVersionRow(
+                version=version,
+                version_date=version_date,
+                deployed_at=deployed_at,
+            )
+        return out

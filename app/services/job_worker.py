@@ -12,6 +12,7 @@ from app.db import Database, new_id, utc_now
 from app.repositories import delete_instance, fail_orphan_running_jobs, mark_build_failed
 from app.services import git_service
 from app.services.docker_service import DockerService
+from app.services.component_versions import build_instance_version_extra_env
 from app.services.instance_runtime import instance_container_env, launch_instance_container
 from app.services.job_queue import LIFECYCLE_JOB_TYPES, pick_next_queued_job
 from app.services.ui_source import (
@@ -519,24 +520,16 @@ class JobWorker:
                     raise RuntimeError("no ready build; queue build first or set image on instance")
                 image_for_run = build["image_tag"]
             example = bc.env_example
-            version_date = utc_now()[:10]
-            git_commit_env = (
-                bc.version_id
-                if is_path_source(inst)
-                else bc.build_git_commit
-            )
-            env = instance_container_env(
+            preview_env = instance_container_env(
                 self.settings,
                 inst,
                 prof,
                 example_path=example,
-                extra_env={
-                    "GRAPES_VERSION": bc.version_id,
-                    "GRAPES_VERSION_DATE": version_date,
-                    "GIT_COMMIT": git_commit_env,
-                },
+                extra_env=build_instance_version_extra_env(self.settings, inst),
             )
-            col_keys = [key for key in env if key.startswith("CH_COL_") or key == "CH_MAC_STORAGE"]
+            col_keys = [
+                key for key in preview_env if key.startswith("CH_COL_") or key == "CH_MAC_STORAGE"
+            ]
             if example and example.is_file():
                 logs.append(f"ui mappings from {example.name}: {len(col_keys)} column keys")
             else:
@@ -553,18 +546,14 @@ class JobWorker:
                     (inst.get("image_tag") or "", utc_now(), instance_id),
                 )
             logs.append(f"starting {name} on port {inst['port']}")
-            cid = self.docker.run_instance_container(
-                name=name,
-                image=image_for_run,
-                port=int(inst["port"]),
-                env=env,
-                data_mount_host=data_dir,
-            )
             self._set_job(job_id, "running", "healthcheck")
-            ok = self.docker.wait_health_http(
-                int(inst["port"]),
-                self.settings.policy.health_timeout_sec,
-                self.settings.policy.health_interval_sec,
+            cid, ok = launch_instance_container(
+                self.db,
+                self.settings,
+                self.docker,
+                inst,
+                image_for_run,
+                example_path=example,
             )
             if not ok:
                 raise RuntimeError("health check failed")
