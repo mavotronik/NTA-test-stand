@@ -125,9 +125,24 @@
             display: flex;
             align-items: center;
             gap: 9px;
+        }
 
+        .logo-text {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            line-height: 1.2;
+        }
+
+        .logo-title {
             font-size: 17px;
             font-weight: 600;
+        }
+
+        .logo-tagline {
+            font-size: 11px;
+            font-weight: 400;
+            color: var(--text-secondary);
         }
 
         .logo-icon {
