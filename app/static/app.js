@@ -342,6 +342,10 @@
       const mode = form.querySelector('input[name="source_mode"]:checked')?.value || 'repo';
       const tagChosen = !!(tagSelect && tagSelect.value);
       if (branchCommitPanel) branchCommitPanel.hidden = tagChosen;
+      if (branchSelect && tagChosen) {
+        const mainOpt = [...branchSelect.options].find((o) => o.value === 'main');
+        if (mainOpt) branchSelect.value = 'main';
+      }
       if (branchSelect) {
         if (mode === 'path' || tagChosen) branchSelect.removeAttribute('required');
         else branchSelect.setAttribute('required', '');

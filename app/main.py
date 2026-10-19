@@ -558,8 +558,8 @@ def _resolve_instance_source_fields(
         if not tag_allowed(settings.policy, tag_pin):
             raise ValueError("тег не разрешён политикой")
         git_service.resolve_tag(repo, tag_pin, settings.policy)
-        branch = git_branch.strip() or "main"
-        if branch and not branch_allowed(settings.policy, branch):
+        branch = "main"
+        if not branch_allowed(settings.policy, branch):
             raise ValueError("ветка не разрешена политикой")
         return branch, "", "repo", "", tag_pin
     branch = git_branch.strip()
@@ -636,6 +636,11 @@ def _instance_form_ctx(
         base_form["port"] = suggested
     if form:
         base_form.update(form)
+    if mode == "repo":
+        if (base_form.get("git_tag") or "").strip():
+            base_form["git_branch"] = "main"
+        elif not (base_form.get("git_branch") or "").strip():
+            base_form["git_branch"] = "main"
     return {
         "profiles": list_db_profiles(db),
         "branches": branches,

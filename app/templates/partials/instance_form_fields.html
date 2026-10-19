@@ -57,8 +57,9 @@
   <div id="instance-source-branch-commit"{% if form.git_tag %} hidden{% endif %}>
     <div class="form-group"><label class="form-label">Git-ветка</label>
       <select class="select" name="git_branch" id="instance-git-branch"{% if src_mode != 'path' and not form.git_tag %} required{% endif %}>
+        {% set branch_sel = form.git_branch if form.git_branch is defined and form.git_branch else 'main' %}
         {% for b in branches %}
-        <option {% if form.git_branch==b %}selected{% endif %}>{{ b }}</option>
+        <option value="{{ b }}"{% if branch_sel == b %} selected{% endif %}>{{ b }}</option>
         {% endfor %}
       </select>
     </div>

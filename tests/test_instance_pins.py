@@ -123,6 +123,59 @@ class InstanceCreatePinTests(unittest.TestCase):
         self.assertEqual(inst["image_tag"], "custom:tag")
         self.assertEqual(inst["git_commit"], "")
 
+    def test_new_form_defaults_git_branch_to_main(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        with (
+            mock.patch("app.main.git_service.list_branches", return_value=["feature/foo", "main"]),
+            mock.patch("app.main.git_service.list_tags", return_value=[]),
+            mock.patch("app.main.git_service.pull_repo", return_value="ok"),
+        ):
+            r = self.client.get("/instances/new")
+        self.assertEqual(r.status_code, 200)
+        self.assertRegex(r.text, r'<option value="main"\s+selected>')
+
+    def test_create_with_git_tag_stores_main_branch(self):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        csrf = self._admin_csrf()
+        settings = get_settings()
+        db = Database(settings.db_path)
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="pins-tag",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        with (
+            mock.patch("app.main.git_service.list_branches", return_value=["feature/foo", "main"]),
+            mock.patch("app.main.git_service.list_tags", return_value=["ui-v1.0.0"]),
+            mock.patch("app.main.git_service.resolve_tag", return_value="a" * 40),
+        ):
+            r = self.client.post(
+                "/instances/new",
+                data={
+                    "csrf_token": csrf,
+                    "name": "Tag pin",
+                    "slug": "tag-pin",
+                    "port": "3119",
+                    "db_profile_id": profile_id,
+                    "git_branch": "feature/foo",
+                    "git_tag": "ui-v1.0.0",
+                },
+                follow_redirects=False,
+            )
+        self.assertEqual(r.status_code, 302)
+        iid = r.headers["location"].rstrip("/").split("/")[-1]
+        inst = get_instance(db, iid)
+        self.assertEqual(inst["git_tag"], "ui-v1.0.0")
+        self.assertEqual(inst["git_branch"], "main")
+
 
 class DeployPreservesPinsTests(unittest.TestCase):
     def setUp(self):
