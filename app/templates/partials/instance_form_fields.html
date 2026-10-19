@@ -44,17 +44,29 @@
   </div>
 </div>
 <div id="instance-source-repo"{% if src_mode == 'path' %} hidden{% endif %}>
-  <div class="form-group"><label class="form-label">Git-ветка</label>
-    <select class="select" name="git_branch" id="instance-git-branch"{% if src_mode != 'path' %} required{% endif %}>
-      {% for b in branches %}
-      <option {% if form.git_branch==b %}selected{% endif %}>{{ b }}</option>
+  <div class="form-group">
+    <label class="form-label" for="instance-git-tag">Версия (тег)</label>
+    <select class="select" name="git_tag" id="instance-git-tag">
+      <option value="">— не выбран (ветка / commit) —</option>
+      {% for t in tags %}
+      <option value="{{ t }}"{% if form.git_tag == t %} selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
+    <p class="field-hint">Если выбран — сборка и деплой идут с этого тега. Список по шаблонам <code>git.allowed_tag_patterns</code> в config.yaml.</p>
   </div>
-  <div class="form-group">
-    <label class="form-label">Commit для сборки (необязательно)</label>
-    <input class="input" name="git_commit" placeholder="полный SHA или короткий; пусто — HEAD ветки" value="{{ form.git_commit or '' }}" autocomplete="off">
-    <p class="field-hint">Сборка и деплой без образа используют этот commit. Пусто — HEAD выбранной ветки. Деплой не меняет поле автоматически.</p>
+  <div id="instance-source-branch-commit"{% if form.git_tag %} hidden{% endif %}>
+    <div class="form-group"><label class="form-label">Git-ветка</label>
+      <select class="select" name="git_branch" id="instance-git-branch"{% if src_mode != 'path' and not form.git_tag %} required{% endif %}>
+        {% for b in branches %}
+        <option {% if form.git_branch==b %}selected{% endif %}>{{ b }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Commit для сборки (необязательно)</label>
+      <input class="input" name="git_commit" id="instance-git-commit" placeholder="полный SHA или короткий; пусто — HEAD ветки" value="{{ form.git_commit or '' }}" autocomplete="off">
+      <p class="field-hint">Сборка и деплой без образа используют этот commit. Пусто — HEAD выбранной ветки. Деплой не меняет поле автоматически.</p>
+    </div>
   </div>
 </div>
 <div id="instance-source-path"{% if src_mode != 'path' %} hidden{% endif %}>

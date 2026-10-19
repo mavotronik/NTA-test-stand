@@ -35,7 +35,7 @@
   <div class="card-header"><div class="card-title">Инстансы</div></div>
   <div class="table-wrapper">
     <table>
-      <thead><tr><th>Имя</th><th>Состояние</th><th>Порт</th><th>БД</th><th>Commit</th><th></th></tr></thead>
+      <thead><tr><th>Имя</th><th>Состояние</th><th>Порт</th><th>БД</th><th>Версия</th><th></th></tr></thead>
       <tbody>
       {% for i in instances %}
       <tr>
@@ -43,7 +43,7 @@
         <td><span class="status"><span class="status-dot status-{{ 'online' if i.state=='running' else ('warning' if i.state=='deploying' else 'offline') }}"></span>{{ i.state }}</span></td>
         <td>{{ i.port }}</td>
         <td>{{ i.db_profile_name }}</td>
-        <td>{{ (i.git_commit or '')[:12] }}</td>
+        <td>{% if i.git_tag %}<code>{{ i.git_tag }}</code>{% else %}{{ (i.git_commit or '')[:12] or '—' }}{% endif %}</td>
         <td><a class="button" href="/instances/{{ i.id }}"><span class="mdi mdi-open-in-app"></span> Открыть</a></td>
       </tr>
       {% else %}

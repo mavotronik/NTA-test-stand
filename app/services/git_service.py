@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from app.config import Policy, branch_allowed
+from app.config import Policy, branch_allowed, tag_allowed
 
 
 class GitError(RuntimeError):
@@ -96,6 +96,40 @@ def list_branches(repo: Path, policy: Policy, *, fetch: bool = True) -> list[str
     return sorted(set(branches))
 
 
+def list_tags(repo: Path, policy: Policy, *, fetch: bool = True) -> list[str]:
+    if not repo.exists():
+        raise GitError(f"repo not found: {repo}")
+    if fetch:
+        try:
+            _run(["git", "-C", str(repo), "fetch", "--prune", "--tags"])
+        except GitError:
+            pass
+    try:
+        out = _run(["git", "-C", str(repo), "tag", "-l", "--sort=-v:refname"])
+    except GitError:
+        return []
+    tags: list[str] = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line and tag_allowed(policy, line):
+            tags.append(line)
+    return tags
+
+
+def resolve_tag(repo: Path, tag: str, policy: Policy, *, fetch: bool = True) -> str:
+    name = tag.strip()
+    if not name:
+        raise GitError("empty tag")
+    if not tag_allowed(policy, name):
+        raise GitError(f"tag not allowed: {name}")
+    if fetch:
+        try:
+            _run(["git", "-C", str(repo), "fetch", "--prune", "--tags"])
+        except GitError:
+            pass
+    return _peel_commit(repo, f"refs/tags/{name}")
+
+
 def _local_branch_name(branch: str) -> str:
     branch = branch.strip()
     if branch.startswith("origin/"):
@@ -113,7 +147,10 @@ def _peel_commit(repo: Path, ref: str) -> str:
 
 
 def resolve_instance_commit(repo: Path, inst: dict, policy: Policy) -> str:
-    """Commit для сборки/деплоя: явный pin в git_commit или HEAD ветки."""
+    """Commit для сборки/деплоя: git_tag, pin в git_commit или HEAD ветки."""
+    tag_pin = (inst.get("git_tag") or "").strip()
+    if tag_pin:
+        return resolve_tag(repo, tag_pin, policy)
     pin = (inst.get("git_commit") or "").strip()
     if pin:
         try:

@@ -8,7 +8,7 @@
   <td>{{ i.state }}</td>
   <td><a href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener">:{{ i.port }}</a></td>
   <td>{{ i.db_profile_name }}</td>
-  <td>{% if i.source_mode == 'path' %}<code title="{{ i.source_path }}">путь</code>{% else %}{{ i.git_branch }}{% endif %}</td>
+  <td>{% if i.source_mode == 'path' %}<code title="{{ i.source_path }}">путь</code>{% elif i.git_tag %}<code title="{{ i.git_tag }}">{{ i.git_tag }}</code>{% else %}{{ i.git_branch }}{% endif %}</td>
   <td>
     <a class="button" href="/instances/{{ i.id }}"><span class="mdi mdi-eye-outline"></span> Детали</a>
     <a class="button" href="http://{{ public_host }}:{{ i.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>

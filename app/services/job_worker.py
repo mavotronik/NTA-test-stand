@@ -363,6 +363,11 @@ class JobWorker:
         pol = self.settings.policy
         repo = Path(self.settings.policy.git_remote_url)
         commit = git_service.resolve_instance_commit(repo, inst, self.settings.policy)
+        tag_name = (inst.get("git_tag") or "").strip()
+        if tag_name:
+            log_label = f"tag {tag_name} ({commit[:12]})"
+        else:
+            log_label = f"commit {commit}"
         wt = git_service.ensure_worktree(
             repo,
             self.settings.git_cache_dir,
@@ -387,7 +392,7 @@ class JobWorker:
             env_example=env_ex if env_ex.is_file() else None,
             version_id=commit[:12],
             build_git_commit=commit,
-            log_label=f"commit {commit}",
+            log_label=log_label,
             image_tag=f"grapes-nta-test:{commit[:12]}",
         )
 

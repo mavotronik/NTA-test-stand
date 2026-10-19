@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS instances (
   db_profile_id TEXT NOT NULL REFERENCES db_profiles(id),
   git_branch TEXT NOT NULL,
   git_commit TEXT NOT NULL DEFAULT '',
+  git_tag TEXT NOT NULL DEFAULT '',
   source_mode TEXT NOT NULL DEFAULT 'repo',
   source_path TEXT NOT NULL DEFAULT '',
   image_tag TEXT NOT NULL DEFAULT '',
@@ -190,6 +191,10 @@ class Database:
         if "source_path" not in cols:
             conn.execute(
                 "ALTER TABLE instances ADD COLUMN source_path TEXT NOT NULL DEFAULT ''"
+            )
+        if "git_tag" not in cols:
+            conn.execute(
+                "ALTER TABLE instances ADD COLUMN git_tag TEXT NOT NULL DEFAULT ''"
             )
 
     def _init_schema(self) -> None:

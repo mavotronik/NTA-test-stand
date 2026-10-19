@@ -59,7 +59,10 @@ class InstanceCreatePinTests(unittest.TestCase):
             writable=False,
             comment="",
         )
-        with mock.patch("app.main.git_service.list_branches", return_value=["main"]):
+        with (
+            mock.patch("app.main.git_service.list_branches", return_value=["main"]),
+            mock.patch("app.main.git_service.list_tags", return_value=[]),
+        ):
             r = self.client.post(
                 "/instances/new",
                 data={
@@ -97,7 +100,10 @@ class InstanceCreatePinTests(unittest.TestCase):
             writable=False,
             comment="",
         )
-        with mock.patch("app.main.git_service.list_branches", return_value=["main"]):
+        with (
+            mock.patch("app.main.git_service.list_branches", return_value=["main"]),
+            mock.patch("app.main.git_service.list_tags", return_value=[]),
+        ):
             r = self.client.post(
                 "/instances/new",
                 data={
@@ -153,7 +159,15 @@ class DeployPreservesPinsTests(unittest.TestCase):
         get_settings.cache_clear()
         self._tmpdir.cleanup()
 
-    def _run_deploy_job(self, *, slug: str, port: int, git_commit: str, image_tag: str) -> None:
+    def _run_deploy_job(
+        self,
+        *,
+        slug: str,
+        port: int,
+        git_commit: str,
+        git_tag: str = "",
+        image_tag: str,
+    ) -> None:
         iid = create_instance(
             self.db,
             slug=slug,
@@ -163,6 +177,7 @@ class DeployPreservesPinsTests(unittest.TestCase):
             git_branch="main",
             user_id=self.uid,
             git_commit=git_commit,
+            git_tag=git_tag,
             image_tag=image_tag,
         )
         jid = queue_job(self.db, iid, "deploy", self.uid)
@@ -198,6 +213,7 @@ class DeployPreservesPinsTests(unittest.TestCase):
         inst = get_instance(self.db, iid)
         self.assertIsNotNone(inst)
         self.assertEqual(inst["git_commit"], git_commit)
+        self.assertEqual(inst.get("git_tag") or "", git_tag)
         self.assertEqual(inst["image_tag"], image_tag)
         self.assertEqual(inst["state"], "running")
 
@@ -206,6 +222,15 @@ class DeployPreservesPinsTests(unittest.TestCase):
 
     def test_deploy_keeps_user_pins(self):
         self._run_deploy_job(slug="deploy-user-pins", port=3118, git_commit="deadbeef", image_tag="user:pin")
+
+    def test_deploy_keeps_git_tag_pin(self):
+        self._run_deploy_job(
+            slug="deploy-tag-pin",
+            port=3119,
+            git_commit="",
+            git_tag="ui-v1.0.0",
+            image_tag="pinned:tag",
+        )
 
 
 if __name__ == "__main__":

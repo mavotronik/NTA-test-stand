@@ -24,6 +24,8 @@ git:
     - "feature/*"
     - "test-stand/*"
     - "ui/*"
+  allowed_tag_patterns:
+    - "ui-*"
 
 ports:
   min: 3100

@@ -334,24 +334,33 @@
     form.dataset.sourceModeBound = '1';
     const repoPanel = form.querySelector('#instance-source-repo');
     const pathPanel = form.querySelector('#instance-source-path');
+    const branchCommitPanel = form.querySelector('#instance-source-branch-commit');
     const branchSelect = form.querySelector('#instance-git-branch');
+    const tagSelect = form.querySelector('#instance-git-tag');
     const pathInput = form.querySelector('#instance-source-path-input');
+    function syncTagCommit() {
+      const mode = form.querySelector('input[name="source_mode"]:checked')?.value || 'repo';
+      const tagChosen = !!(tagSelect && tagSelect.value);
+      if (branchCommitPanel) branchCommitPanel.hidden = tagChosen;
+      if (branchSelect) {
+        if (mode === 'path' || tagChosen) branchSelect.removeAttribute('required');
+        else branchSelect.setAttribute('required', '');
+      }
+    }
     function sync() {
       const mode = form.querySelector('input[name="source_mode"]:checked')?.value || 'repo';
       if (repoPanel) repoPanel.hidden = mode === 'path';
       if (pathPanel) pathPanel.hidden = mode !== 'path';
-      if (branchSelect) {
-        if (mode === 'path') branchSelect.removeAttribute('required');
-        else branchSelect.setAttribute('required', '');
-      }
       if (pathInput) {
         if (mode === 'path') pathInput.setAttribute('required', '');
         else pathInput.removeAttribute('required');
       }
+      syncTagCommit();
     }
     form.querySelectorAll('input[name="source_mode"]').forEach((el) => {
       el.addEventListener('change', sync);
     });
+    if (tagSelect) tagSelect.addEventListener('change', syncTagCommit);
     sync();
   }
   initInstancePortInput(document.getElementById('instance-port'));

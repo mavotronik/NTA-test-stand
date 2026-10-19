@@ -10,6 +10,7 @@ from app.config import (
     load_policy_from_mapping,
     load_settings,
     resolve_public_host,
+    tag_allowed,
 )
 
 
@@ -23,6 +24,15 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(branch_allowed(policy, "main"))
         self.assertTrue(branch_allowed(policy, "feature/foo"))
         self.assertFalse(branch_allowed(policy, "secret/experimental"))
+
+    def test_tag_patterns(self):
+        data = yaml.safe_load(
+            (Path(__file__).resolve().parents[1] / "config.example.yaml").read_text(encoding="utf-8")
+        )
+        example_dir = Path(__file__).resolve().parents[1]
+        policy = load_policy_from_mapping(data, config_dir=example_dir)
+        self.assertTrue(tag_allowed(policy, "ui-v1.0.16"))
+        self.assertFalse(tag_allowed(policy, "detection-v1.0.0"))
 
     def test_host_allowlist(self):
         data = yaml.safe_load(

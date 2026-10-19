@@ -6,6 +6,7 @@
 {% else %}
 <p>Источник: <strong>Репозиторий</strong></p>
 <p>Ветка: <strong>{{ instance.git_branch }}</strong></p>
+<p>Тег: <code>{{ instance.git_tag or '—' }}</code></p>
 <p>Commit: <code>{{ instance.git_commit or '—' }}</code></p>
 {% endif %}
 <p>Образ: <code>{{ instance.image_tag or '—' }}</code></p>

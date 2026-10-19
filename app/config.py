@@ -35,6 +35,7 @@ def resolve_public_host(configured: str, request_host: str | None) -> str:
 class Policy:
     git_remote_url: str
     allowed_branch_patterns: list[str]
+    allowed_tag_patterns: list[str]
     port_min: int
     port_max: int
     storage_root: str
@@ -76,6 +77,7 @@ def load_policy_from_mapping(data: Mapping[str, Any], *, config_dir: Path | None
     return Policy(
         git_remote_url=str(git.get("remote_url", "")),
         allowed_branch_patterns=list(git.get("allowed_branch_patterns") or ["main"]),
+        allowed_tag_patterns=list(git.get("allowed_tag_patterns") or []),
         port_min=int(ports.get("min", 3100)),
         port_max=int(ports.get("max", 3199)),
         storage_root=str(
@@ -108,6 +110,16 @@ def branch_allowed(policy: Policy, branch: str) -> bool:
         return False
     for pat in policy.allowed_branch_patterns:
         if fnmatch.fnmatch(branch, pat):
+            return True
+    return False
+
+
+def tag_allowed(policy: Policy, tag: str) -> bool:
+    tag = tag.strip()
+    if not tag:
+        return False
+    for pat in policy.allowed_tag_patterns:
+        if fnmatch.fnmatch(tag, pat):
             return True
     return False
 

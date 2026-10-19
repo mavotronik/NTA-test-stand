@@ -28,6 +28,7 @@ def _policy(root: Path) -> Policy:
     return Policy(
         git_remote_url=str(root / "repo"),
         allowed_branch_patterns=["main", "ui/*", "feature/*"],
+        allowed_tag_patterns=[],
         port_min=3100,
         port_max=3199,
         storage_root=str(root / "data"),

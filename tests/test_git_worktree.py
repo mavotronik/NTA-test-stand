@@ -59,6 +59,7 @@ class GitWorktreeCleanupTests(unittest.TestCase):
             pol = Policy(
                 git_remote_url=str(repo),
                 allowed_branch_patterns=["*"],
+                allowed_tag_patterns=[],
                 port_min=3100,
                 port_max=3199,
                 storage_root=str(root / "data"),

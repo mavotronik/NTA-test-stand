@@ -97,6 +97,7 @@ def create_instance(
     git_branch: str,
     user_id: str,
     git_commit: str = "",
+    git_tag: str = "",
     image_tag: str = "",
     source_mode: str = "repo",
     source_path: str = "",
@@ -108,9 +109,9 @@ def create_instance(
             """
             INSERT INTO instances(
               id, slug, name, port, state, db_profile_id, git_branch,
-              git_commit, source_mode, source_path, image_tag,
+              git_commit, git_tag, source_mode, source_path, image_tag,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 iid,
@@ -121,6 +122,7 @@ def create_instance(
                 db_profile_id,
                 git_branch,
                 git_commit.strip(),
+                git_tag.strip(),
                 source_mode,
                 source_path.strip(),
                 image_tag.strip(),
@@ -149,6 +151,7 @@ def update_instance(
     db_profile_id: str,
     git_branch: str,
     git_commit: str,
+    git_tag: str,
     image_tag: str,
     user_id: str,
     source_mode: str = "repo",
@@ -159,7 +162,7 @@ def update_instance(
         conn.execute(
             """
             UPDATE instances SET
-              name=?, port=?, db_profile_id=?, git_branch=?, git_commit=?,
+              name=?, port=?, db_profile_id=?, git_branch=?, git_commit=?, git_tag=?,
               source_mode=?, source_path=?, image_tag=?,
               updated_by=?, updated_at=?, config_version=config_version + 1
             WHERE id=?
@@ -170,6 +173,7 @@ def update_instance(
                 db_profile_id,
                 git_branch,
                 git_commit.strip(),
+                git_tag.strip(),
                 source_mode,
                 source_path.strip(),
                 image_tag.strip(),
