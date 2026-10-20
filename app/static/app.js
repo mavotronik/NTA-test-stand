@@ -249,6 +249,47 @@
     }
   }
 
+  const SELF_UPDATE_RELOAD_KEY = 'tsm-self-update-reload';
+
+  function dismissAllModals() {
+    document.querySelectorAll('.modal-overlay').forEach((overlay) => {
+      overlay.classList.remove('visible');
+      overlay.setAttribute('aria-hidden', 'true');
+    });
+    document.body.classList.remove('modal-open');
+    const formInner = document.getElementById('formModalInner');
+    const logInner = document.getElementById('logModalInner');
+    if (formInner) formInner.innerHTML = '';
+    if (logInner) logInner.innerHTML = '';
+  }
+
+  function hardReloadAfterSelfUpdate() {
+    sessionStorage.setItem(SELF_UPDATE_RELOAD_KEY, '1');
+    dismissAllModals();
+    const url = new URL(window.location.href);
+    url.searchParams.set('_', String(Date.now()));
+    url.hash = '';
+    window.location.replace(url.toString());
+  }
+
+  if (sessionStorage.getItem(SELF_UPDATE_RELOAD_KEY) === '1') {
+    sessionStorage.removeItem(SELF_UPDATE_RELOAD_KEY);
+    dismissAllModals();
+    const cleanUrl = new URL(window.location.href);
+    if (cleanUrl.searchParams.has('_')) {
+      cleanUrl.searchParams.delete('_');
+      history.replaceState(null, '', cleanUrl.toString());
+    }
+  }
+
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted) return;
+    dismissAllModals();
+    if (sessionStorage.getItem(SELF_UPDATE_RELOAD_KEY) === '1') {
+      hardReloadAfterSelfUpdate();
+    }
+  });
+
   if (document.querySelector('.modal-overlay.visible, .modal-overlay:target')) {
     document.body.classList.add('modal-open');
   }
@@ -743,7 +784,7 @@
       fetch('/api/health', { cache: 'no-store', credentials: 'same-origin' })
         .then((r) => {
           if (r.ok) {
-            window.location.reload();
+            hardReloadAfterSelfUpdate();
             return;
           }
           throw new Error('not ready');
