@@ -429,8 +429,12 @@
 
   function initSearchableSelect(select) {
     if (!select || select.dataset.searchableBound) return;
+    if (select.closest('.searchable-select')) return;
     select.dataset.searchableBound = '1';
+    select.classList.remove('select');
     select.classList.add('searchable-select-native');
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
     const wrap = document.createElement('div');
     wrap.className = 'searchable-select';
     select.parentNode.insertBefore(wrap, select);
