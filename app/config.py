@@ -135,6 +135,14 @@ def host_allowed(policy: Policy, host: str) -> bool:
 
 
 @dataclass
+class SelfUpdateConfig:
+    enabled: bool
+    check_interval_sec: float
+    branch: str
+    systemd_unit: str
+
+
+@dataclass
 class Settings:
     host: str
     port: int
@@ -147,6 +155,7 @@ class Settings:
     bootstrap_admin_user: str
     bootstrap_admin_password: str
     skip_worker: bool
+    self_update: SelfUpdateConfig
     policy: Policy = field(repr=False)
 
     @property
@@ -197,6 +206,14 @@ def load_settings(path: Path | None = None) -> Settings:
     data_dir.mkdir(parents=True, exist_ok=True)
     fernet_raw = str(mgr.get("fernet_key", "") or "").strip()
     fernet_key = fernet_raw.encode("utf-8") if fernet_raw else None
+    su = data.get("self_update") or {}
+    self_update = SelfUpdateConfig(
+        enabled=bool(su.get("enabled", True)),
+        check_interval_sec=float(su.get("check_interval_sec", 600)),
+        branch=str(su.get("branch", "main")).strip() or "main",
+        systemd_unit=str(su.get("systemd_unit", "nta-test-stand.service")).strip()
+        or "nta-test-stand.service",
+    )
     return Settings(
         host=str(mgr.get("host", "127.0.0.1")),
         port=int(mgr.get("port", 8080)),
@@ -209,5 +226,6 @@ def load_settings(path: Path | None = None) -> Settings:
         bootstrap_admin_user=str(mgr.get("bootstrap_admin_user", "admin")),
         bootstrap_admin_password=str(mgr.get("bootstrap_admin_password", "") or ""),
         skip_worker=bool(mgr.get("skip_worker", False)),
+        self_update=self_update,
         policy=policy,
     )

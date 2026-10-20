@@ -343,8 +343,108 @@
             text-transform: uppercase;
         }
 
+        .sidebar-build-commit-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
         .sidebar-build-commit {
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+
+        button.sidebar-build-commit {
+            margin: 0;
+            padding: 0;
+
+            border: none;
+
+            background: none;
+
+            font: inherit;
+            text-align: inherit;
+        }
+
+        .sidebar-build-commit--updates {
+            color: var(--success);
+            font-weight: 600;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .sidebar-build-commit--updates:hover {
+            color: color-mix(in srgb, var(--success) 82%, var(--text));
+        }
+
+        .sidebar-build-update-icon {
+            color: var(--success);
+            font-size: 14px;
+            line-height: 1;
+        }
+
+        .self-update-changelog-title {
+            margin: 12px 0 8px;
+
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+
+        .self-update-commit-list {
+            margin: 0;
+            padding: 0;
+
+            list-style: none;
+        }
+
+        .self-update-commit-item {
+            padding: 10px 0;
+
+            border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+        }
+
+        .self-update-commit-item:first-child {
+            border-top: none;
+        }
+
+        .self-update-commit-sha {
+            margin-right: 8px;
+
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .self-update-commit-subject {
+            font-weight: 500;
+        }
+
+        .self-update-commit-body {
+            margin: 6px 0 0;
+
+            padding: 8px 10px;
+
+            overflow-x: auto;
+
+            border-radius: 8px;
+
+            background: color-mix(in srgb, var(--surface-2, var(--surface)) 88%, transparent);
+            color: var(--text-secondary);
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+
+        .self-update-warning {
+            color: var(--warning);
+        }
+
+        .self-update-error {
+            color: var(--danger);
+        }
+
+        .self-update-git-log {
+            max-height: 40vh;
         }
 
         .sidebar-repo {

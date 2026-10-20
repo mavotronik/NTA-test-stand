@@ -1,0 +1,11 @@
+<div class="sidebar-footer" title="Сборка {{ panel_build.built_at_iso or panel_build.built_at }} · {{ panel_build.commit or 'коммит неизвестен' }}{% if panel_build.repo_url %} · {{ panel_build.repo_url }}{% endif %}">
+  <span class="mdi mdi-source-commit" aria-hidden="true"></span>
+  <span class="sidebar-build nav-label">
+    <span class="sidebar-build-label">Сборка</span>
+    <span class="sidebar-build-time">{{ panel_build.built_at }}</span>
+    <span class="sidebar-build-commit">{{ panel_build.commit_short }}</span>
+    {% if panel_build.repo_url %}
+    <a class="sidebar-repo" href="{{ panel_build.repo_url }}" target="_blank" rel="noopener noreferrer" title="Репозиторий проекта">{{ panel_build.repo_name }}</a>
+    {% endif %}
+  </span>
+</div>

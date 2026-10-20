@@ -49,17 +49,26 @@
     {% endif %}
     </div>
   </div>
-  <div class="sidebar-footer" title="Сборка {{ panel_build.built_at_iso or panel_build.built_at }} · {{ panel_build.commit or 'коммит неизвестен' }}{% if panel_build.repo_url %} · {{ panel_build.repo_url }}{% endif %}">
-    <span class="mdi mdi-source-commit" aria-hidden="true"></span>
-    <span class="sidebar-build nav-label">
-      <span class="sidebar-build-label">Сборка</span>
-      <span class="sidebar-build-time">{{ panel_build.built_at }}</span>
-      <span class="sidebar-build-commit">{{ panel_build.commit_short }}</span>
-      {% if panel_build.repo_url %}
-      <a class="sidebar-repo" href="{{ panel_build.repo_url }}" target="_blank" rel="noopener noreferrer" title="Репозиторий проекта">{{ panel_build.repo_name }}</a>
-      {% endif %}
-    </span>
+  {% if self_update_enabled %}
+  <div id="sidebar-build-footer"
+       hx-get="/partials/self-update/footer"
+       hx-trigger="load, every 10s, self-update-refresh from:body"
+       hx-swap="innerHTML">
+    <div class="sidebar-footer">
+      <span class="mdi mdi-source-commit" aria-hidden="true"></span>
+      <span class="sidebar-build nav-label">
+        <span class="sidebar-build-label">Сборка</span>
+        <span class="sidebar-build-time">{{ panel_build.built_at }}</span>
+        <span class="sidebar-build-commit">{{ panel_build.commit_short }}</span>
+        {% if panel_build.repo_url %}
+        <a class="sidebar-repo" href="{{ panel_build.repo_url }}" target="_blank" rel="noopener noreferrer" title="Репозиторий проекта">{{ panel_build.repo_name }}</a>
+        {% endif %}
+      </span>
+    </div>
   </div>
+  {% else %}
+  {% include "partials/self_update_footer_static.html" %}
+  {% endif %}
 </aside>
 <main class="main">
   <div class="content">
@@ -92,6 +101,7 @@
   </div>
 </div>
 <div class="toast-container" id="toastContainer"></div>
+{% if self_update_enabled %}{% include "partials/self_update_status.html" %}{% endif %}
 <script src="/static/app.js"></script>
 {% endif %}
 {% block scripts %}{% endblock %}

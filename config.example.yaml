@@ -64,3 +64,10 @@ host_metrics:
   disk_paths:
     - /
     - /var/lib/grapes-test-manager
+
+# Самообновление checkout стенда (REPO_ROOT) и перезапуск systemd-сервиса.
+self_update:
+  enabled: true
+  check_interval_sec: 600
+  branch: main
+  systemd_unit: nta-test-stand.service

@@ -10,6 +10,7 @@ from app.config import Settings, load_settings
 from app.db import Database
 from app.services.host_metrics import HostMetricsCollector
 from app.services.job_worker import JobWorker
+from app.services.self_update import SelfUpdateService
 
 
 @lru_cache
@@ -23,6 +24,7 @@ def get_db(settings: Annotated[Settings, Depends(get_settings)]) -> Database:
 
 _metrics: HostMetricsCollector | None = None
 _worker: JobWorker | None = None
+_self_update: SelfUpdateService | None = None
 
 
 def get_metrics(settings: Annotated[Settings, Depends(get_settings)]) -> HostMetricsCollector:
@@ -41,6 +43,36 @@ def get_worker(
         _worker = JobWorker(settings, db)
         _worker.start()
     return _worker
+
+
+def get_self_update_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SelfUpdateService:
+    global _self_update
+    if _self_update is None:
+        _self_update = SelfUpdateService(settings.self_update)
+    return _self_update
+
+
+def init_self_update_service(settings: Settings, db: Database) -> SelfUpdateService:
+    """Вызывается из lifespan: аудит и старт фоновой проверки."""
+    global _self_update
+    from app.services.audit import write_audit
+
+    svc = SelfUpdateService(settings.self_update)
+    svc.set_audit_callback(
+        lambda **kw: write_audit(db, **kw),
+    )
+    svc.start()
+    _self_update = svc
+    return svc
+
+
+def stop_self_update_service() -> None:
+    global _self_update
+    if _self_update is not None:
+        _self_update.stop()
+        _self_update = None
 
 
 LOGIN_REQUIRED_DETAIL = "login required"

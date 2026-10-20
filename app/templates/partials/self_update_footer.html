@@ -1,0 +1,29 @@
+<div class="sidebar-footer" title="Сборка {{ panel_build.built_at_iso or panel_build.built_at }} · {{ panel_build.commit or 'коммит неизвестен' }}{% if panel_build.repo_url %} · {{ panel_build.repo_url }}{% endif %}">
+  <span class="mdi mdi-source-commit" aria-hidden="true"></span>
+  <span class="sidebar-build nav-label">
+    <span class="sidebar-build-label">Сборка</span>
+    <span class="sidebar-build-time">{{ panel_build.built_at }}</span>
+    <span class="sidebar-build-commit-row">
+      {% if su.update_available %}
+      <button type="button"
+              class="sidebar-build-commit sidebar-build-commit--updates"
+              title="Доступно обновление до {{ su.remote_commit_short }}"
+              hx-get="/partials/self-update/modal"
+              hx-target="#formModalInner"
+              hx-swap="innerHTML"
+              hx-push-url="false">{{ su.running_commit_short }}</button>
+      <span class="sidebar-build-update-icon mdi mdi-arrow-up" aria-hidden="true" title="Есть обновление"></span>
+      {% else %}
+      <span class="sidebar-build-commit"
+            title="Двойной щелчок — проверить обновления"
+            hx-get="/partials/self-update/footer?force=1"
+            hx-target="#sidebar-build-footer"
+            hx-swap="innerHTML"
+            hx-trigger="dblclick">{{ su.running_commit_short or panel_build.commit_short }}</span>
+      {% endif %}
+    </span>
+    {% if panel_build.repo_url %}
+    <a class="sidebar-repo" href="{{ panel_build.repo_url }}" target="_blank" rel="noopener noreferrer" title="Репозиторий проекта">{{ panel_build.repo_name }}</a>
+    {% endif %}
+  </span>
+</div>

@@ -1,0 +1,39 @@
+<div class="modal modal-lg modal-log js-form-modal-dialog js-self-update-progress"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="selfUpdateProgressTitle"
+     data-tone="success"
+     {% if su.phase in ('pulling', 'restarting') %}
+     hx-get="/partials/self-update/progress"
+     hx-trigger="every 2s"
+     hx-swap="outerHTML"
+     {% endif %}>
+  <div class="modal-header">
+    <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-update"></span></div>
+    <h2 class="modal-title" id="selfUpdateProgressTitle">Обновление стенда</h2>
+    {% if su.phase not in ('pulling', 'restarting') %}
+    <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+    {% endif %}
+  </div>
+  <div class="modal-body">
+    {% if apply_error is defined and apply_error %}
+    <p class="self-update-error">{{ apply_error }}</p>
+    {% endif %}
+    {% if su.phase == 'restarting' or su.restart_pending %}
+    <p class="self-update-warning"><span class="mdi mdi-alert-outline"></span> Сейчас будет перезапущен сервис <strong>{{ systemd_unit }}</strong>. Страница перезагрузится автоматически.</p>
+    {% endif %}
+    {% if su.pull_error %}
+    <p class="self-update-error">{{ su.pull_error }}</p>
+    {% endif %}
+    {% if su.pull_log %}
+    <pre class="job-log-text self-update-git-log">{{ su.pull_log }}</pre>
+    {% elif su.phase == 'pulling' %}
+    <p>Выполняется <code>git pull</code>…</p>
+    {% endif %}
+  </div>
+  {% if su.phase not in ('pulling', 'restarting') and not su.restart_pending %}
+  <div class="modal-footer">
+    <button type="button" class="button" data-close-modal>Закрыть</button>
+  </div>
+  {% endif %}
+</div>

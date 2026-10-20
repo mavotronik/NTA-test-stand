@@ -1,0 +1,8 @@
+<div id="self-update-status"
+     class="self-update-status"
+     data-phase="{{ su.phase if su is defined else 'idle' }}"
+     data-restart-pending="{{ '1' if su is defined and su.restart_pending else '0' }}"
+     data-initiated-by="{{ su.initiated_by|e if su is defined else '' }}"
+     hx-get="/partials/self-update/status"
+     hx-trigger="every 10s, self-update-refresh from:body"
+     hx-swap="outerHTML"></div>

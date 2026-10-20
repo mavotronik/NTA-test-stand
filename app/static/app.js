@@ -707,5 +707,74 @@
     if (root && header) root.dataset.lastJobStatus = header.dataset.jobStatus || '';
 
     scheduleAutoOpenInstanceUi(root, prevStatus);
+    if (target?.id === 'self-update-status') {
+      handleSelfUpdateStatus(target);
+    }
+    if (target?.querySelector?.('.js-self-update-progress') || target?.classList?.contains('js-self-update-progress')) {
+      initFormModalInner(target.id === 'formModalInner' ? target : target.querySelector('#formModalInner') || target);
+    }
+  });
+
+  const selfUpdateState = {
+    toastShown: false,
+    reloadStarted: false,
+  };
+
+  function showSelfUpdateToast(message) {
+    const container = document.getElementById('toastContainer');
+    if (!container || !message) return;
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = '<span class="mdi mdi-update"></span><span></span>';
+    el.querySelector('span:last-child').textContent = message;
+    container.appendChild(el);
+    window.setTimeout(() => el.remove(), 12000);
+  }
+
+  function pollHealthAndReload() {
+    if (selfUpdateState.reloadStarted) return;
+    selfUpdateState.reloadStarted = true;
+    let attempts = 0;
+    const tick = () => {
+      attempts += 1;
+      fetch('/api/health', { cache: 'no-store', credentials: 'same-origin' })
+        .then((r) => {
+          if (r.ok) {
+            window.location.reload();
+            return;
+          }
+          throw new Error('not ready');
+        })
+        .catch(() => {
+          if (attempts < 120) window.setTimeout(tick, 1000);
+        });
+    };
+    window.setTimeout(tick, 1500);
+  }
+
+  function handleSelfUpdateStatus(el) {
+    if (!el?.dataset) return;
+    const phase = el.dataset.phase || '';
+    const restart = el.dataset.restartPending === '1';
+    const by = (el.dataset.initiatedBy || '').trim();
+    if ((phase === 'pulling' || phase === 'restarting' || restart) && !selfUpdateState.toastShown) {
+      selfUpdateState.toastShown = true;
+      const who = by ? ` ${by}` : '';
+      showSelfUpdateToast(`Систему обновляет${who}. Страница перезагрузится.`);
+    }
+    if (phase === 'restarting' || restart) {
+      pollHealthAndReload();
+    }
+  }
+
+  document.getElementById('self-update-status')?.dataset &&
+    handleSelfUpdateStatus(document.getElementById('self-update-status'));
+
+  document.body.addEventListener('htmx:afterSwap', (evt) => {
+    const target = evt.detail.target;
+    if (target?.id === 'formModalInner') {
+      const progress = target.querySelector('.js-self-update-progress');
+      if (progress) openOverlay(document.getElementById('formModal'));
+    }
   });
 })();

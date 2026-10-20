@@ -1,0 +1,41 @@
+<div class="modal modal-lg js-form-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="selfUpdateTitle" data-tone="success">
+  <div class="modal-header">
+    <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-update"></span></div>
+    <h2 class="modal-title" id="selfUpdateTitle">Обновление стенда</h2>
+    <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+  </div>
+  <div class="modal-body">
+    <p>Доступна новая версия в ветке <strong>{{ su.branch }}</strong>: <code>{{ su.remote_commit_short }}</code> (сейчас <code>{{ su.running_commit_short }}</code>).</p>
+    {% if su.commits %}
+    <div class="self-update-changelog">
+      <div class="self-update-changelog-title">Изменения</div>
+      <ul class="self-update-commit-list">
+        {% for c in su.commits %}
+        <li class="self-update-commit-item">
+          <span class="self-update-commit-sha">{{ c.sha_short }}</span>
+          <span class="self-update-commit-subject">{{ c.subject }}</span>
+          {% if c.body %}
+          <pre class="self-update-commit-body">{{ c.body }}</pre>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if su.check_error %}
+    <p class="self-update-error">{{ su.check_error }}</p>
+    {% endif %}
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="button" data-close-modal>Отложить</button>
+    {% if can_apply_self_update %}
+    <form method="post" action="/self-update/apply" style="display:inline;margin:0;"
+          hx-post="/self-update/apply"
+          hx-target="#formModalInner"
+          hx-swap="innerHTML">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button type="submit" class="button success"><span class="mdi mdi-download"></span> Обновить</button>
+    </form>
+    {% endif %}
+  </div>
+</div>

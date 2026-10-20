@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from app import auth
 from app.build_info import panel_build_info
 from app.auth import (
+    ROLE_RANK,
     authenticate,
     bootstrap_admin,
     create_session,
@@ -33,10 +34,14 @@ from app.deps import (
     current_user,
     get_db,
     get_metrics,
+    get_self_update_service,
     get_settings,
     get_worker,
+    init_self_update_service,
     optional_user,
+    stop_self_update_service,
 )
+from app.services.self_update import SelfUpdateError, snapshot_to_dict
 from app.repositories import (
     create_instance,
     delete_db_profile,
@@ -82,7 +87,9 @@ async def lifespan(app: FastAPI):
     db = Database(settings.db_path)
     bootstrap_admin(db, settings.bootstrap_admin_user, settings.bootstrap_admin_password)
     worker = None if settings.skip_worker else get_worker(settings, db)
+    init_self_update_service(settings, db)
     yield
+    stop_self_update_service()
     if worker:
         worker.stop()
 
@@ -90,7 +97,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Test Stand Manager", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 def _template_context(request: Request) -> dict[str, Any]:
-    return {"panel_build": panel_build_info()}
+    return {
+        "panel_build": panel_build_info(),
+        "self_update_enabled": get_settings().self_update.enabled,
+    }
 
 
 templates = Jinja2Templates(
@@ -238,6 +248,7 @@ AUDIT_ACTION_LABELS: dict[str, str] = {
     "user_create": "Создание пользователя",
     "user_password": "Смена пароля",
     "user_delete": "Удаление пользователя",
+    "self_update": "Обновление стенда",
 }
 
 AUDIT_ACTION_ICONS: dict[str, str] = {
@@ -260,6 +271,7 @@ AUDIT_ACTION_ICONS: dict[str, str] = {
     "user_create": "mdi-account-plus",
     "user_password": "mdi-key",
     "user_delete": "mdi-account-remove",
+    "self_update": "mdi-update",
 }
 
 AUDIT_ACTION_TONE: dict[str, str] = {
@@ -291,6 +303,128 @@ def _render(request: Request, name: str, ctx: dict[str, Any], status: int = 200)
 @app.get("/api/health")
 def api_health() -> dict[str, str]:
     return {"ok": "true"}
+
+
+def _self_update_ctx(user: dict[str, Any], snap) -> dict[str, Any]:
+    can_apply = ROLE_RANK.get(user["role"], 0) >= ROLE_RANK.get("operator", 99)
+    return {
+        "user": user,
+        "su": snap,
+        "can_apply_self_update": can_apply,
+        "systemd_unit": get_settings().self_update.systemd_unit,
+    }
+
+
+@app.get("/api/self-update/status")
+def api_self_update_status(
+    user=Depends(current_user),
+    svc=Depends(get_self_update_service),
+) -> JSONResponse:
+    return JSONResponse(snapshot_to_dict(svc.snapshot()))
+
+
+@app.get("/partials/self-update/footer", response_class=HTMLResponse)
+def partial_self_update_footer(
+    request: Request,
+    force: str = "",
+    user=Depends(current_user),
+    settings=Depends(get_settings),
+    svc=Depends(get_self_update_service),
+):
+    if not settings.self_update.enabled:
+        return _render(
+            request,
+            "partials/self_update_footer_static.html",
+            {"user": user},
+        )
+    if force.strip() in ("1", "true", "yes"):
+        svc.check_now()
+    snap = svc.snapshot()
+    resp = _render(
+        request,
+        "partials/self_update_footer.html",
+        _self_update_ctx(user, snap),
+    )
+    if force.strip() in ("1", "true", "yes"):
+        resp.headers["HX-Trigger"] = "self-update-refresh"
+    return resp
+
+
+@app.get("/partials/self-update/status", response_class=HTMLResponse)
+def partial_self_update_status(
+    request: Request,
+    user=Depends(current_user),
+    svc=Depends(get_self_update_service),
+):
+    snap = svc.snapshot()
+    return _render(
+        request,
+        "partials/self_update_status.html",
+        _self_update_ctx(user, snap),
+    )
+
+
+@app.get("/partials/self-update/modal", response_class=HTMLResponse)
+def partial_self_update_modal(
+    request: Request,
+    user=Depends(current_user),
+    svc=Depends(get_self_update_service),
+):
+    snap = svc.snapshot()
+    if not snap.update_available and snap.phase not in ("pulling", "restarting", "failed"):
+        raise HTTPException(status_code=404, detail="Нет обновления")
+    return _render(
+        request,
+        "partials/self_update_modal.html",
+        _self_update_ctx(user, snap),
+    )
+
+
+@app.get("/partials/self-update/progress", response_class=HTMLResponse)
+def partial_self_update_progress(
+    request: Request,
+    user=Depends(current_user),
+    svc=Depends(get_self_update_service),
+):
+    snap = svc.snapshot()
+    return _render(
+        request,
+        "partials/self_update_progress.html",
+        _self_update_ctx(user, snap),
+    )
+
+
+@app.post("/self-update/apply", response_class=HTMLResponse)
+async def self_update_apply(
+    request: Request,
+    csrf_token: str = Form(""),
+    user=Depends(current_user),
+    svc=Depends(get_self_update_service),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    try:
+        snap = svc.apply_update(
+            username=user["username"],
+            user_id=user["id"],
+            role=user["role"],
+            ip=_client_ip(request),
+        )
+    except SelfUpdateError as err:
+        snap = svc.snapshot()
+        return _render(
+            request,
+            "partials/self_update_progress.html",
+            {**_self_update_ctx(user, snap), "apply_error": str(err)},
+            status=400,
+        )
+    resp = _render(
+        request,
+        "partials/self_update_progress.html",
+        _self_update_ctx(user, snap),
+    )
+    resp.headers["HX-Trigger"] = "self-update-refresh"
+    return resp
 
 
 @app.get("/api/host-metrics")
