@@ -53,7 +53,26 @@
     if (jobLogAutoscrollEnabled(pre)) scrollJobLogToBottom(pre);
   });
 
+  function redirectToLoginFromHtmx(evt) {
+    const xhr = evt.detail.xhr;
+    if (!xhr) return false;
+    if (window.location.pathname === '/login') return false;
+    let responsePath = '';
+    try {
+      responsePath = new URL(xhr.responseURL || '', window.location.origin).pathname;
+    } catch (_) {
+      responsePath = '';
+    }
+    if (xhr.status === 401 || responsePath === '/login') {
+      evt.detail.shouldSwap = false;
+      window.location.href = '/login';
+      return true;
+    }
+    return false;
+  }
+
   document.body.addEventListener('htmx:beforeSwap', (evt) => {
+    if (redirectToLoginFromHtmx(evt)) return;
     const target = evt.detail.target;
     if (target?.id === 'instance-job-status') {
       const root = instanceJobWatchRoot();
@@ -214,6 +233,7 @@
   }
 
   document.body.addEventListener('htmx:responseError', (evt) => {
+    if (redirectToLoginFromHtmx(evt)) return;
     if (evt.detail.target?.id === 'instance-current-task' && evt.detail.xhr?.status === 404) {
       window.location.href = '/instances?message=instance+deleted';
     }

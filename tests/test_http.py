@@ -58,6 +58,15 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(r.status_code, 302)
         self.assertIn("/login", r.headers.get("location", ""))
 
+    def test_htmx_unauthenticated_gets_hx_redirect(self):
+        c = TestClient(self.app)
+        c.cookies.clear()
+        with c:
+            r = c.get("/", headers={"HX-Request": "true"}, follow_redirects=False)
+        self.assertEqual(r.status_code, 401)
+        self.assertEqual(r.headers.get("HX-Redirect"), "/login")
+        self.assertNotIn('name="password"', r.text)
+
     def test_host_metrics_requires_auth(self):
         c = TestClient(self.app)
         c.cookies.clear()

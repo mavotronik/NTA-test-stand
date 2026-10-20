@@ -120,6 +120,8 @@ templates = Jinja2Templates(
 @app.exception_handler(HTTPException)
 async def handle_http_exception(request: Request, exc: HTTPException):
     if exc.status_code == 401 and exc.detail == LOGIN_REQUIRED_DETAIL and not _wants_json_response(request):
+        if _is_htmx(request):
+            return Response(status_code=401, headers={"HX-Redirect": "/login"})
         return RedirectResponse(url="/login", status_code=302)
     return await http_exception_handler(request, exc)
 
