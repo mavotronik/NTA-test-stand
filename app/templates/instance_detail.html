@@ -11,6 +11,12 @@
     {% if instance.source_mode != 'path' %}{% with return_to="detail", instance_id=instance.id %}{% include "partials/git_pull_form.html" %}{% endwith %}{% endif %}
     {% with url="/partials/instances/" ~ instance.id ~ "/edit?return_to=detail", label="Изменить", icon="mdi-pencil" %}{% include "partials/form_modal_link.html" %}{% endwith %}
     {% endif %}
+    <a class="button"
+       href="/instances/{{ instance.id }}"
+       hx-get="/partials/instances/{{ instance.id }}/container-log-modal"
+       hx-target="#logModalInner"
+       hx-swap="innerHTML"
+       hx-push-url="false"><span class="mdi mdi-text-box-outline"></span> Логи</a>
     <a class="button" href="http://{{ public_host }}:{{ instance.port }}/" target="_blank" rel="noopener"><span class="mdi mdi-open-in-new"></span> Открыть UI</a>
   </div>
 </div>

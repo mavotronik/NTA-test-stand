@@ -682,6 +682,7 @@ class HttpTests(unittest.TestCase):
         self.assertIn('id="instance-config"', detail.text)
         self.assertIn('id="instance-actions"', detail.text)
         self.assertIn('hx-post="/instances/%s/build-run"' % iid, detail.text)
+        self.assertIn("/partials/instances/%s/container-log-modal" % iid, detail.text)
         self.assertIn("abc1234", detail.text)
         self.assertIn("old:tag", detail.text)
         self.assertIn("0123456789ab"[:12], detail.text)
@@ -729,6 +730,24 @@ class HttpTests(unittest.TestCase):
         watch = self.client.get(f"/instances/{iid}/jobs/{job['id']}/watch")
         self.assertEqual(watch.status_code, 200)
         self.assertIn("job-log-pre", watch.text)
+        self.assertIn("data-container-logs-url", watch.text)
+        self.assertIn(f"/instances/{iid}/container-logs", watch.text)
+
+        modal = self.client.get(f"/partials/instances/{iid}/container-log-modal")
+        self.assertEqual(modal.status_code, 200)
+        self.assertIn("js-log-modal-dialog", modal.text)
+        self.assertIn("Логи контейнера", modal.text)
+        self.assertIn(f'data-container-logs-url="/instances/{iid}/container-logs"', modal.text)
+
+        from app.services.docker_service import DockerService
+
+        with mock.patch.object(DockerService, "get_container", return_value=None) as get_container:
+            with mock.patch.object(DockerService, "open_container_logs_follow") as open_logs:
+                logs = self.client.get(f"/instances/{iid}/container-logs")
+        self.assertEqual(logs.status_code, 200)
+        self.assertIn("контейнер не найден", logs.text)
+        get_container.assert_called()
+        open_logs.assert_not_called()
 
         conflict = self.client.post(
             f"/instances/{iid}/build-run",

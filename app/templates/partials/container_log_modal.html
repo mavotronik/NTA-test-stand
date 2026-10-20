@@ -1,0 +1,13 @@
+<div class="modal modal-log js-log-modal-dialog job-log-shell" role="dialog" aria-modal="true" aria-labelledby="containerLogTitle" data-tone="primary">
+  <div class="modal-header">
+    <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-text-box-outline"></span></div>
+    <div class="modal-header-grow">
+      <h2 class="modal-title" id="containerLogTitle">Логи контейнера · {{ instance.name }}</h2>
+      {% include "partials/job_log_autoscroll_toggle.html" %}
+    </div>
+    <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+  </div>
+  <div class="modal-body modal-body-log">
+    <pre class="job-log-pre" data-container-logs-url="{{ container_logs_url }}"></pre>
+  </div>
+</div>

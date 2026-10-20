@@ -427,6 +427,28 @@ class DockerService:
         c.reload()
         return c.status
 
+    def open_container_logs_follow(self, name: str, *, tail: int = 500) -> subprocess.Popen[str]:
+        if not shutil.which("docker"):
+            raise RuntimeError("docker not found")
+        return subprocess.Popen(
+            ["docker", "logs", "-f", f"--tail={tail}", name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            bufsize=1,
+        )
+
+    @staticmethod
+    def terminate_logs_process(proc: subprocess.Popen[Any]) -> None:
+        if proc.poll() is not None:
+            return
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
     def wait_health_http(self, port: int, timeout_sec: int, interval_sec: int) -> bool:
         import urllib.error
         import urllib.request

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import time
@@ -9,7 +10,7 @@ from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -81,6 +82,7 @@ from app.services.audit import write_audit
 from app.services.clickhouse_check import check_clickhouse_connection
 from app.services import git_service
 from app.services.ui_source import UiSourceError, find_ui_layout, normalize_source_path
+from app.services.docker_service import DockerService
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -139,6 +141,33 @@ JOB_TYPE_LABELS: dict[str, str] = {
 
 def _job_log_lines(db: Database, job_id: str, *, after_id: int = 0) -> list[dict[str, Any]]:
     return list_job_log_rows(db, job_id, after_id=after_id)
+
+
+def _instance_container_name(slug: str) -> str:
+    return f"grapes-test-{slug}"
+
+
+async def _stream_instance_container_logs(request: Request, slug: str, *, tail: int = 500):
+    docker = DockerService()
+    name = _instance_container_name(slug)
+    if docker.get_container(name) is None:
+        yield "контейнер не найден\n"
+        return
+    proc = docker.open_container_logs_follow(name, tail=tail)
+    stdout = proc.stdout
+    if stdout is None:
+        docker.terminate_logs_process(proc)
+        return
+    try:
+        while True:
+            if await request.is_disconnected():
+                break
+            chunk = await asyncio.to_thread(stdout.read, 4096)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        docker.terminate_logs_process(proc)
 
 
 def _instance_watch_job(db: Database, instance_id: str, job_param: str = "") -> dict[str, Any] | None:
@@ -1295,6 +1324,46 @@ async def instance_detail(request: Request, instance_id: str, db: Database = Dep
             "message": message,
             "error": error,
         },
+    )
+
+
+@app.get("/partials/instances/{instance_id}/container-log-modal", response_class=HTMLResponse)
+async def partial_instance_container_log_modal(
+    request: Request,
+    instance_id: str,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    logs_url = f"/instances/{instance_id}/container-logs"
+    return _render(
+        request,
+        "partials/container_log_modal.html",
+        {
+            "user": user,
+            "instance": inst,
+            "container_logs_url": logs_url,
+        },
+    )
+
+
+@app.get("/instances/{instance_id}/container-logs")
+async def instance_container_logs(
+    request: Request,
+    instance_id: str,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    inst = get_instance(db, instance_id)
+    if not inst:
+        raise HTTPException(404)
+    tail = int(request.query_params.get("tail", "500") or "500")
+    tail = max(1, min(tail, 10_000))
+    return StreamingResponse(
+        _stream_instance_container_logs(request, inst["slug"], tail=tail),
+        media_type="text/plain; charset=utf-8",
     )
 
 

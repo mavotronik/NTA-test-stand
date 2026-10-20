@@ -144,6 +144,75 @@
     return { after_id: afterId };
   };
 
+  let containerLogsAbort = null;
+
+  function stopContainerLogsStream() {
+    if (containerLogsAbort) {
+      containerLogsAbort.abort();
+      containerLogsAbort = null;
+    }
+  }
+
+  function disableJobLogPolling(pre) {
+    if (!pre || pre.dataset.jobLogPollingDisabled === '1') return;
+    pre.dataset.jobLogPollingDisabled = '1';
+    pre.removeAttribute('hx-get');
+    pre.removeAttribute('hx-trigger');
+    pre.removeAttribute('hx-swap');
+    pre.removeAttribute('hx-vals');
+    if (typeof htmx !== 'undefined') htmx.process(pre);
+  }
+
+  async function startContainerLogsStream(pre, url) {
+    if (!pre || !url || pre.dataset.containerLogsActive === '1') return;
+    pre.dataset.containerLogsActive = '1';
+    stopContainerLogsStream();
+    const ac = new AbortController();
+    containerLogsAbort = ac;
+    const decoder = new TextDecoder();
+    try {
+      const resp = await fetch(url, { credentials: 'same-origin', signal: ac.signal });
+      if (!resp.ok || !resp.body) return;
+      const reader = resp.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pre.appendChild(document.createTextNode(decoder.decode(value, { stream: true })));
+        if (jobLogAutoscrollEnabled(pre)) scrollJobLogToBottom(pre);
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        pre.appendChild(document.createTextNode(`\n[ошибка потока логов: ${err?.message || err}]\n`));
+      }
+    } finally {
+      if (containerLogsAbort === ac) containerLogsAbort = null;
+    }
+  }
+
+  function maybeStartBuildRunContainerLogs(root) {
+    if (!root || root.dataset.jobType !== 'build_run') return;
+    const url = root.dataset.containerLogsUrl;
+    if (!url) return;
+    const header = root.querySelector('[data-job-status]');
+    if (!header || header.dataset.jobStatus !== 'done') return;
+    const pre = root.querySelector('.job-log-pre');
+    if (!pre) return;
+    disableJobLogPolling(pre);
+    if (pre.dataset.containerLogsActive === '1') return;
+    pre.appendChild(document.createTextNode('\n--- логи контейнера ---\n'));
+    startContainerLogsStream(pre, url);
+  }
+
+  function initContainerLogsForModal(inner) {
+    if (!inner) return;
+    const directPre = inner.querySelector('.job-log-pre[data-container-logs-url]');
+    if (directPre?.dataset.containerLogsUrl) {
+      startContainerLogsStream(directPre, directPre.dataset.containerLogsUrl);
+      return;
+    }
+    maybeStartBuildRunContainerLogs(inner.querySelector('#instance-job-watch') || instanceJobWatchRoot());
+  }
+
   document.body.addEventListener('htmx:responseError', (evt) => {
     if (evt.detail.target?.id === 'instance-current-task' && evt.detail.xhr?.status === 404) {
       window.location.href = '/instances?message=instance+deleted';
@@ -190,6 +259,7 @@
     inner.querySelectorAll('.job-log-pre').forEach((pre) => {
       if (jobLogAutoscrollEnabled(pre)) scrollJobLogToBottom(pre);
     });
+    initContainerLogsForModal(inner);
   }
 
   function prefetchModalHtml(url) {
@@ -236,6 +306,7 @@
 
   function closeOverlay(overlay) {
     if (!overlay) return;
+    if (overlay.id === 'logModal') stopContainerLogsStream();
     overlay.classList.remove('visible');
     overlay.setAttribute('aria-hidden', 'true');
     if (overlay.id && location.hash === '#' + overlay.id) {
@@ -252,6 +323,7 @@
   const SELF_UPDATE_RELOAD_KEY = 'tsm-self-update-reload';
 
   function dismissAllModals() {
+    stopContainerLogsStream();
     document.querySelectorAll('.modal-overlay').forEach((overlay) => {
       overlay.classList.remove('visible');
       overlay.setAttribute('aria-hidden', 'true');
@@ -704,6 +776,7 @@
       if (verb === 'get') showModalLoadingPlaceholder(target);
     }
     if (target?.id === 'logModalInner' && verb === 'get') {
+      stopContainerLogsStream();
       openOverlay(document.getElementById('logModal'));
       showModalLoadingPlaceholder(target);
     }
@@ -751,6 +824,7 @@
     if (root && header) root.dataset.lastJobStatus = header.dataset.jobStatus || '';
 
     scheduleAutoOpenInstanceUi(root, prevStatus);
+    maybeStartBuildRunContainerLogs(root);
     if (target?.id === 'self-update-status') {
       handleSelfUpdateStatus(target);
     }

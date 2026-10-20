@@ -1,4 +1,4 @@
-<div class="modal modal-log js-log-modal-dialog job-log-shell" id="instance-job-watch" role="dialog" aria-modal="true" data-tone="primary" data-watch-job-id="{{ job.id }}" data-job-type="{{ job.job_type }}">
+<div class="modal modal-log js-log-modal-dialog job-log-shell" id="instance-job-watch" role="dialog" aria-modal="true" data-tone="primary" data-watch-job-id="{{ job.id }}" data-job-type="{{ job.job_type }}"{% if job.job_type == 'build_run' %} data-container-logs-url="/instances/{{ instance.id }}/container-logs"{% endif %}>
   <div class="modal-header">
     <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-text-box-outline"></span></div>
     <div id="instance-job-status"
