@@ -61,6 +61,8 @@ deploy:
 
 host_metrics:
   refresh_sec: 5
+  history_retention_hours: 72
+  history_max_points: 400
   disk_paths:
     - /
     - /var/lib/grapes-test-manager

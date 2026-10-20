@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -34,11 +35,14 @@ from app.deps import (
     current_user,
     get_db,
     get_metrics,
+    get_metrics_store,
     get_self_update_service,
     get_settings,
     get_worker,
+    init_host_metrics_recorder,
     init_self_update_service,
     optional_user,
+    stop_host_metrics_recorder,
     stop_self_update_service,
 )
 from app.services.self_update import SelfUpdateError, snapshot_to_dict
@@ -88,7 +92,9 @@ async def lifespan(app: FastAPI):
     bootstrap_admin(db, settings.bootstrap_admin_user, settings.bootstrap_admin_password)
     worker = None if settings.skip_worker else get_worker(settings, db)
     init_self_update_service(settings, db)
+    init_host_metrics_recorder(settings)
     yield
+    stop_host_metrics_recorder()
     stop_self_update_service()
     if worker:
         worker.stop()
@@ -427,9 +433,86 @@ async def self_update_apply(
     return resp
 
 
+_HOST_METRIC_LABELS = {
+    "cpu": "CPU",
+    "memory": "RAM",
+    "disk": "Disk",
+    "load": "Load Average",
+}
+
+
+def _host_metric_history(
+    metric: str,
+    hours: float,
+    *,
+    settings,
+    store,
+    metrics_collector,
+) -> dict[str, object]:
+    metric = (metric or "").strip().lower()
+    if metric not in _HOST_METRIC_LABELS:
+        raise HTTPException(status_code=400, detail="unknown metric")
+    hours = max(1.0, min(168.0, float(hours)))
+    now = time.time()
+    since = now - hours * 3600.0
+    max_points = settings.policy.host_metrics_history_max_points
+    points = store.query_series(metric, since, now, max_points=max_points)
+    snap = metrics_collector.snapshot()
+    payload: dict[str, object] = {
+        "metric": metric,
+        "hours": hours,
+        "points": points,
+        "cpu_count": snap.cpu_count,
+    }
+    if metric == "load":
+        payload["value_kind"] = "load"
+    else:
+        payload["value_kind"] = "percent"
+    return payload
+
+
 @app.get("/api/host-metrics")
 def api_host_metrics(metrics=Depends(get_metrics), user=Depends(current_user)) -> JSONResponse:
     return JSONResponse(metrics.as_dict())
+
+
+@app.get("/api/host-metrics/history")
+def api_host_metrics_history(
+    metric: str,
+    hours: float = 24,
+    settings=Depends(get_settings),
+    store=Depends(get_metrics_store),
+    metrics_collector=Depends(get_metrics),
+    user=Depends(current_user),
+) -> JSONResponse:
+    return JSONResponse(
+        _host_metric_history(metric, hours, settings=settings, store=store, metrics_collector=metrics_collector)
+    )
+
+
+@app.get("/partials/host-metrics/chart-modal", response_class=HTMLResponse)
+def partial_host_metrics_chart_modal(
+    request: Request,
+    metric: str,
+    settings=Depends(get_settings),
+    metrics_collector=Depends(get_metrics),
+    user=Depends(current_user),
+):
+    metric = (metric or "").strip().lower()
+    if metric not in _HOST_METRIC_LABELS:
+        raise HTTPException(status_code=400, detail="unknown metric")
+    snap = metrics_collector.snapshot()
+    return _render(
+        request,
+        "partials/host_metric_chart_modal.html",
+        {
+            "user": user,
+            "metric": metric,
+            "metric_label": _HOST_METRIC_LABELS[metric],
+            "cpu_count": snap.cpu_count,
+            "history_hours": 72,
+        },
+    )
 
 
 @app.get("/partials/host-metrics", response_class=HTMLResponse)
@@ -438,7 +521,12 @@ def partial_host_metrics(request: Request, metrics=Depends(get_metrics), setting
     return _render(
         request,
         "partials/host_metrics.html",
-        {"metrics": snap, "user": user, "refresh_sec": settings.policy.host_metrics_refresh_sec},
+        {
+            "metrics": snap,
+            "user": user,
+            "refresh_sec": settings.policy.host_metrics_refresh_sec,
+            "cpu_count": snap.get("cpu_count", 1),
+        },
     )
 
 
@@ -639,6 +727,7 @@ async def overview(
             "queued_jobs": queued,
             "refresh_sec": settings.policy.host_metrics_refresh_sec,
             "metrics": metrics.as_dict(),
+            "cpu_count": metrics.snapshot().cpu_count,
         },
     )
 

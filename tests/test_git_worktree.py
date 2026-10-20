@@ -74,6 +74,8 @@ class GitWorktreeCleanupTests(unittest.TestCase):
                 health_interval_sec=3,
                 host_metrics_refresh_sec=5,
                 host_disk_paths=["/"],
+                host_metrics_history_retention_hours=72,
+                host_metrics_history_max_points=400,
             )
             got = git_service.resolve_instance_commit(
                 repo, {"git_commit": full[:12], "git_branch": "main"}, pol

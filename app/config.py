@@ -50,6 +50,8 @@ class Policy:
     health_interval_sec: int
     host_metrics_refresh_sec: float
     host_disk_paths: list[str]
+    host_metrics_history_retention_hours: float
+    host_metrics_history_max_points: int
 
 
 def _parse_cidrs(raw: list[str]) -> list[ipaddress._BaseNetwork]:
@@ -96,6 +98,8 @@ def load_policy_from_mapping(data: Mapping[str, Any], *, config_dir: Path | None
         health_interval_sec=int(deploy.get("health_interval_sec", 3)),
         host_metrics_refresh_sec=float(hm.get("refresh_sec", 5)),
         host_disk_paths=list(hm.get("disk_paths") or ["/"]),
+        host_metrics_history_retention_hours=float(hm.get("history_retention_hours", 72)),
+        host_metrics_history_max_points=int(hm.get("history_max_points", 400)),
     )
 
 
@@ -161,6 +165,10 @@ class Settings:
     @property
     def db_path(self) -> Path:
         return self.data_dir / "manager.sqlite"
+
+    @property
+    def host_metrics_db_path(self) -> Path:
+        return self.data_dir / "host_metrics.sqlite"
 
     @property
     def git_cache_dir(self) -> Path:

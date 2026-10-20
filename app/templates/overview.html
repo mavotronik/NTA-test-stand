@@ -11,7 +11,7 @@
      hx-get="/partials/host-metrics"
      hx-trigger="load, every {{ refresh_sec|default(5) }}s"
      hx-swap="innerHTML">
-  {% include "partials/host_metrics.html" %}
+  {% with cpu_count=cpu_count|default(1) %}{% include "partials/host_metrics.html" %}{% endwith %}
 </div>
 <section class="metrics" style="margin-bottom:18px;">
   <div class="card metric">

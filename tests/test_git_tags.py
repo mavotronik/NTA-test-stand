@@ -43,6 +43,8 @@ def _policy(root: Path, *, tag_patterns: list[str] | None = None) -> Policy:
         health_interval_sec=3,
         host_metrics_refresh_sec=5,
         host_disk_paths=["/"],
+        host_metrics_history_retention_hours=72,
+        host_metrics_history_max_points=400,
     )
 
 

@@ -175,6 +175,9 @@
     openOverlay(document.getElementById('formModal'));
     initInstancePortInput(inner.querySelector('#instance-port'));
     initInstanceSourceMode(inner);
+    if (inner.querySelector('[data-host-metric-modal]')) {
+      initHostMetricCharts(inner);
+    }
     inner.querySelector('input:not([disabled]), select, textarea')?.focus();
   }
 
@@ -770,8 +773,185 @@
   document.getElementById('self-update-status')?.dataset &&
     handleSelfUpdateStatus(document.getElementById('self-update-status'));
 
+  const hostMetricPalette = { green: '#22c55e', orange: '#f97316', red: '#ef4444' };
+
+  function readHostMetricPalette() {
+    const root = document.documentElement;
+    const styles = getComputedStyle(root);
+    return {
+      green: styles.getPropertyValue('--success').trim() || hostMetricPalette.green,
+      orange: hostMetricPalette.orange,
+      red: styles.getPropertyValue('--danger').trim() || hostMetricPalette.red,
+    };
+  }
+
+  function parseHexColor(hex) {
+    const h = hex.replace('#', '').trim();
+    if (h.length === 3) {
+      return [
+        parseInt(h[0] + h[0], 16),
+        parseInt(h[1] + h[1], 16),
+        parseInt(h[2] + h[2], 16),
+      ];
+    }
+    if (h.length >= 6) {
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+    }
+    return [34, 197, 94];
+  }
+
+  function mixColors(c1, c2, t) {
+    const a = parseHexColor(c1);
+    const b = parseHexColor(c2);
+    const r = Math.round(a[0] + (b[0] - a[0]) * t);
+    const g = Math.round(a[1] + (b[1] - a[1]) * t);
+    const bl = Math.round(a[2] + (b[2] - a[2]) * t);
+    return `rgb(${r},${g},${bl})`;
+  }
+
+  function metricColorForValue(pct, palette) {
+    const p = Math.max(0, Math.min(100, pct));
+    if (p <= 50) return mixColors(palette.green, palette.orange, p / 50);
+    if (p <= 95) return mixColors(palette.orange, palette.red, (p - 50) / 45);
+    return palette.red;
+  }
+
+  function colorValueForMetric(metric, value, cpuCount) {
+    if (metric === 'load') {
+      const cpus = Math.max(1, Number(cpuCount) || 1);
+      return Math.min(100, (Number(value) / cpus) * 100);
+    }
+    return Number(value);
+  }
+
+  function fetchHostMetricHistory(metric, hours) {
+    const q = new URLSearchParams({ metric, hours: String(hours) });
+    return fetch(`/api/host-metrics/history?${q}`, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    }).then((r) => (r.ok ? r.json() : null));
+  }
+
+  function setupHostMetricCanvasSize(canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.floor(rect.width));
+    const h = Math.max(1, Math.floor(rect.height));
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+
+  function drawHostMetricChart(canvas, payload) {
+    const { ctx, w, h } = setupHostMetricCanvasSize(canvas);
+    ctx.clearRect(0, 0, w, h);
+    const palette = readHostMetricPalette();
+    const metric = canvas.dataset.metric || payload?.metric || 'cpu';
+    const cpuCount = canvas.dataset.cpuCount || payload?.cpu_count || 1;
+    const valueKind = payload?.value_kind || (metric === 'load' ? 'load' : 'percent');
+    const points = payload?.points || [];
+    const isCardBg = canvas.dataset.chartRole === 'card-bg';
+    const pad = isCardBg
+      ? { l: 0, r: 0, t: 8, b: 8 }
+      : { l: 4, r: 4, t: 6, b: 6 };
+    const innerW = w - pad.l - pad.r;
+    const innerH = h - pad.t - pad.b;
+    if (!points.length) {
+      if (!isCardBg) {
+        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#6b7280';
+        ctx.font = '12px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Накапливаем данные…', w / 2, h / 2 + 4);
+      }
+      return;
+    }
+
+    const values = points.map((p) => Number(p.value));
+    let yMin = 0;
+    let yMax = 100;
+    if (valueKind === 'load') {
+      yMin = Math.min(...values);
+      yMax = Math.max(...values);
+      if (yMin === yMax) {
+        yMin = Math.max(0, yMin - 0.5);
+        yMax = yMax + 0.5;
+      } else {
+        const padY = (yMax - yMin) * 0.08;
+        yMin = Math.max(0, yMin - padY);
+        yMax = yMax + padY;
+      }
+    }
+
+    const tMin = points[0].ts;
+    const tMax = points[points.length - 1].ts;
+    const tSpan = tMax - tMin || 1;
+
+    function xAt(i) {
+      return pad.l + ((points[i].ts - tMin) / tSpan) * innerW;
+    }
+    function yAt(val) {
+      const ratio = (val - yMin) / (yMax - yMin || 1);
+      return pad.t + innerH - ratio * innerH;
+    }
+
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    for (let i = 1; i < points.length; i += 1) {
+      const v0 = values[i - 1];
+      const v1 = values[i];
+      const x0 = xAt(i - 1);
+      const y0 = yAt(v0);
+      const x1 = xAt(i);
+      const y1 = yAt(v1);
+      const steps = 12;
+      for (let s = 0; s < steps; s += 1) {
+        const t0 = s / steps;
+        const t1 = (s + 1) / steps;
+        const vm = v0 + (v1 - v0) * ((t0 + t1) / 2);
+        const colorVal = colorValueForMetric(metric, vm, cpuCount);
+        ctx.strokeStyle = metricColorForValue(colorVal, palette);
+        ctx.beginPath();
+        ctx.moveTo(x0 + (x1 - x0) * t0, y0 + (y1 - y0) * t0);
+        ctx.lineTo(x0 + (x1 - x0) * t1, y0 + (y1 - y0) * t1);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function initHostMetricCanvas(canvas) {
+    if (!canvas || canvas.dataset.chartLoading === '1') return;
+    const metric = canvas.dataset.metric;
+    const hours = canvas.dataset.historyHours || '24';
+    if (!metric) return;
+    canvas.dataset.chartLoading = '1';
+    fetchHostMetricHistory(metric, hours)
+      .then((payload) => {
+        if (!payload) return;
+        if (payload.cpu_count != null) canvas.dataset.cpuCount = String(payload.cpu_count);
+        drawHostMetricChart(canvas, payload);
+      })
+      .catch(() => {})
+      .finally(() => {
+        delete canvas.dataset.chartLoading;
+      });
+  }
+
+  function initHostMetricCharts(root) {
+    const scope = root || document;
+    scope.querySelectorAll('canvas.host-metric-chart-canvas').forEach(initHostMetricCanvas);
+  }
+
+  initHostMetricCharts(document.getElementById('host-metrics-panel'));
+
   document.body.addEventListener('htmx:afterSwap', (evt) => {
     const target = evt.detail.target;
+    if (target?.id === 'host-metrics-panel') {
+      initHostMetricCharts(target);
+    }
     if (target?.id === 'formModalInner') {
       const progress = target.querySelector('.js-self-update-progress');
       if (progress) openOverlay(document.getElementById('formModal'));

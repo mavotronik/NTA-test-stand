@@ -1,0 +1,15 @@
+<div class="modal modal-lg js-form-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="hostMetricChartTitle" data-tone="primary" data-host-metric-modal data-metric="{{ metric }}" data-history-hours="{{ history_hours }}" data-cpu-count="{{ cpu_count }}">
+  <div class="modal-header">
+    <div class="modal-icon" aria-hidden="true"><span class="mdi mdi-chart-line"></span></div>
+    <h2 class="modal-title" id="hostMetricChartTitle">{{ metric_label }} — 72 ч</h2>
+    <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
+  </div>
+  <div class="modal-body">
+    <div class="chart-container host-metric-chart-modal">
+      <canvas class="host-metric-chart-canvas" data-metric="{{ metric }}" data-history-hours="{{ history_hours }}" data-cpu-count="{{ cpu_count }}" aria-label="График {{ metric_label }}"></canvas>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="button" data-close-modal>Закрыть</button>
+  </div>
+</div>

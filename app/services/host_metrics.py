@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from functools import lru_cache
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ import psutil
 @dataclass
 class HostMetricsSnapshot:
     cpu_percent: float
+    cpu_count: int
     memory_percent: float
     memory_used_gb: float
     memory_total_gb: float
@@ -20,6 +22,20 @@ class HostMetricsSnapshot:
     load_15: float
     disks: list[dict[str, Any]]
     ts: float
+
+
+@lru_cache(maxsize=1)
+def _cpu_count(host_proc: Path) -> int:
+    stat_path = host_proc / "stat"
+    if stat_path.exists():
+        n = 0
+        for line in stat_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("cpu") and not line.startswith("cpu "):
+                n += 1
+        if n > 0:
+            return n
+    count = os.cpu_count()
+    return count if count and count > 0 else 1
 
 
 def _read_loadavg(host_proc: Path) -> tuple[float, float, float]:
@@ -116,6 +132,7 @@ class HostMetricsCollector:
         cpu = self._cpu_ema
         return HostMetricsSnapshot(
             cpu_percent=round(cpu, 1),
+            cpu_count=_cpu_count(self.host_proc),
             memory_percent=round(mem_pct, 1),
             memory_used_gb=round(mem_used, 2),
             memory_total_gb=round(mem_total, 2),
