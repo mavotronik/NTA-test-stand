@@ -7,12 +7,16 @@
     <div class="page-subtitle">Инстансы и состояние хоста</div>
   </div>
 </div>
-<div id="host-metrics-panel"
-     hx-get="/partials/host-metrics"
-     hx-trigger="load, every {{ refresh_sec|default(5) }}s"
-     hx-swap="innerHTML">
+<div id="host-metrics-panel">
   {% with cpu_count=cpu_count|default(1) %}{% include "partials/host_metrics.html" %}{% endwith %}
 </div>
+<div id="host-metrics-live"
+     data-chart-refresh-sec="{{ refresh_sec|default(5) }}"
+     hx-get="/partials/host-metrics/overlays"
+     hx-trigger="every {{ refresh_sec|default(5) }}s"
+     hx-swap="none"
+     hidden
+     aria-hidden="true"></div>
 <section class="metrics" style="margin-bottom:18px;">
   <div class="card metric">
     <div class="metric-label">Инстансы</div>

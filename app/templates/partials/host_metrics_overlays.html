@@ -1,0 +1,7 @@
+{% from "partials/host_metrics_overlay_fragments.html" import cpu_overlay, memory_overlay, load_overlay, disk_overlay %}
+<div id="host-metric-cpu-overlay" hx-swap-oob="innerHTML">{{ cpu_overlay(metrics) }}</div>
+<div id="host-metric-memory-overlay" hx-swap-oob="innerHTML">{{ memory_overlay(metrics) }}</div>
+<div id="host-metric-load-overlay" hx-swap-oob="innerHTML">{{ load_overlay(metrics) }}</div>
+{% if metrics.disks %}
+<div id="host-metric-disk-overlay" hx-swap-oob="innerHTML">{{ disk_overlay(metrics) }}</div>
+{% endif %}

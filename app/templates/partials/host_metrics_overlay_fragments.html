@@ -1,0 +1,38 @@
+{% macro cpu_overlay(metrics) %}
+      <div class="metric-top">
+        <div class="metric-icon"><span class="mdi mdi-chip"></span></div>
+        <span class="status"><span class="status-dot status-online pulse"></span>Live</span>
+      </div>
+      <div class="metric-label">CPU</div>
+      <div class="metric-value">{{ metrics.cpu_percent }}%</div>
+      <div class="progress"><div class="progress-value {% if metrics.cpu_percent > 85 %}danger{% elif metrics.cpu_percent > 70 %}warning{% endif %}" style="width:{{ metrics.cpu_percent }}%"></div></div>
+{% endmacro %}
+
+{% macro memory_overlay(metrics) %}
+      <div class="metric-top">
+        <div class="metric-icon"><span class="mdi mdi-memory"></span></div>
+      </div>
+      <div class="metric-label">RAM</div>
+      <div class="metric-value">{{ metrics.memory_percent }}%</div>
+      <div class="metric-extra">{{ metrics.memory_used_gb }} / {{ metrics.memory_total_gb }} GB</div>
+      <div class="progress"><div class="progress-value {% if metrics.memory_percent > 85 %}danger{% elif metrics.memory_percent > 70 %}warning{% endif %}" style="width:{{ metrics.memory_percent }}%"></div></div>
+{% endmacro %}
+
+{% macro load_overlay(metrics) %}
+      <div class="metric-top">
+        <div class="metric-icon"><span class="mdi mdi-speedometer"></span></div>
+      </div>
+      <div class="metric-label">Load Average</div>
+      <div class="metric-value">{{ metrics.load_1 }}</div>
+      <div class="metric-extra">5m: {{ metrics.load_5 }} · 15m: {{ metrics.load_15 }}</div>
+{% endmacro %}
+
+{% macro disk_overlay(metrics) %}
+      <div class="metric-top">
+        <div class="metric-icon"><span class="mdi mdi-harddisk"></span></div>
+      </div>
+      <div class="metric-label">Disk ({{ metrics.disks[0].path }})</div>
+      <div class="metric-value">{{ metrics.disks[0].percent }}%</div>
+      <div class="metric-extra">{{ metrics.disks[0].used_gb }} / {{ metrics.disks[0].total_gb }} GB</div>
+      <div class="progress"><div class="progress-value {% if metrics.disks[0].percent > 85 %}danger{% elif metrics.disks[0].percent > 70 %}warning{% endif %}" style="width:{{ metrics.disks[0].percent }}%"></div></div>
+{% endmacro %}

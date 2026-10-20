@@ -874,6 +874,35 @@
   }
 
   const hostMetricChartState = new WeakMap();
+  const hostMetricBaseBitmap = new WeakMap();
+
+  function hostMetricPayloadSignature(payload) {
+    const pts = payload?.points;
+    if (!pts?.length) return '0';
+    const last = pts[pts.length - 1];
+    return `${pts.length}:${last.ts}:${last.value}`;
+  }
+
+  function saveHostMetricChartBase(canvas) {
+    if (!canvas.width || !canvas.height) return;
+    const base = document.createElement('canvas');
+    base.width = canvas.width;
+    base.height = canvas.height;
+    base.getContext('2d').drawImage(canvas, 0, 0);
+    hostMetricBaseBitmap.set(canvas, base);
+  }
+
+  function restoreHostMetricChartBase(canvas) {
+    const base = hostMetricBaseBitmap.get(canvas);
+    if (!base?.width || canvas.width !== base.width || canvas.height !== base.height) return false;
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(base, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return true;
+  }
 
   function formatHostMetricValue(value, valueKind, unit) {
     const n = Number(value);
@@ -1066,6 +1095,7 @@
       const unitHint = layout.valueKind === 'load' ? 'load' : layout.unit || '%';
       ctx.fillText(unitHint, w - 8, h - 6);
     }
+    saveHostMetricChartBase(canvas);
   }
 
   function nearestHostMetricPointIndex(layout, mouseX) {
@@ -1088,8 +1118,8 @@
   function drawHostMetricHover(canvas, index) {
     const stored = hostMetricChartState.get(canvas);
     if (!stored?.layout || stored.layout.empty || index < 0) return;
-    drawHostMetricChart(canvas, stored.payload);
-    const { layout } = hostMetricChartState.get(canvas);
+    if (!restoreHostMetricChartBase(canvas)) drawHostMetricChart(canvas, stored.payload);
+    const { layout } = stored;
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1121,8 +1151,10 @@
 
     function hideTooltip() {
       tooltip.hidden = true;
-      const stored = hostMetricChartState.get(canvas);
-      if (stored?.payload) drawHostMetricChart(canvas, stored.payload);
+      if (!restoreHostMetricChartBase(canvas)) {
+        const stored = hostMetricChartState.get(canvas);
+        if (stored?.payload) drawHostMetricChart(canvas, stored.payload);
+      }
     }
 
     canvas.addEventListener('mousemove', (e) => {
@@ -1153,22 +1185,45 @@
     canvas.addEventListener('mouseleave', hideTooltip);
   }
 
+  function applyHostMetricPayload(canvas, payload) {
+    if (!payload) return;
+    const sig = hostMetricPayloadSignature(payload);
+    if (canvas.dataset.chartSig === sig) return;
+    canvas.dataset.chartSig = sig;
+    if (payload.cpu_count != null) canvas.dataset.cpuCount = String(payload.cpu_count);
+    drawHostMetricChart(canvas, payload);
+    canvas.dataset.chartReady = '1';
+  }
+
   function initHostMetricCanvas(canvas) {
     if (!canvas || canvas.dataset.chartLoading === '1') return;
+    if (canvas.dataset.chartRole === 'card-bg' && canvas.dataset.chartReady === '1') return;
     const metric = canvas.dataset.metric;
     const hours = canvas.dataset.historyHours || '24';
     if (!metric) return;
     canvas.dataset.chartLoading = '1';
     fetchHostMetricHistory(metric, hours)
       .then((payload) => {
-        if (!payload) return;
-        if (payload.cpu_count != null) canvas.dataset.cpuCount = String(payload.cpu_count);
-        drawHostMetricChart(canvas, payload);
+        applyHostMetricPayload(canvas, payload);
         if (!canvas.dataset.chartRole) bindHostMetricModalChart(canvas);
       })
       .catch(() => {})
       .finally(() => {
         delete canvas.dataset.chartLoading;
+      });
+  }
+
+  function refreshHostMetricCardCharts() {
+    document
+      .querySelectorAll('#host-metrics-panel canvas.host-metric-chart-canvas[data-chart-role="card-bg"]')
+      .forEach((canvas) => {
+        if (canvas.dataset.chartLoading === '1') return;
+        const metric = canvas.dataset.metric;
+        const hours = canvas.dataset.historyHours || '24';
+        if (!metric) return;
+        fetchHostMetricHistory(metric, hours)
+          .then((payload) => applyHostMetricPayload(canvas, payload))
+          .catch(() => {});
       });
   }
 
@@ -1179,11 +1234,14 @@
 
   initHostMetricCharts(document.getElementById('host-metrics-panel'));
 
+  const hostMetricsLive = document.getElementById('host-metrics-live');
+  const hostMetricsChartSec = Math.max(1, parseFloat(hostMetricsLive?.dataset.chartRefreshSec || '5'));
+  if (hostMetricsLive) {
+    setInterval(refreshHostMetricCardCharts, hostMetricsChartSec * 1000);
+  }
+
   document.body.addEventListener('htmx:afterSwap', (evt) => {
     const target = evt.detail.target;
-    if (target?.id === 'host-metrics-panel') {
-      initHostMetricCharts(target);
-    }
     if (target?.id === 'formModalInner') {
       const progress = target.querySelector('.js-self-update-progress');
       if (progress) openOverlay(document.getElementById('formModal'));

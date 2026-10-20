@@ -542,6 +542,16 @@ def partial_host_metrics(request: Request, metrics=Depends(get_metrics), setting
     )
 
 
+@app.get("/partials/host-metrics/overlays", response_class=HTMLResponse)
+def partial_host_metrics_overlays(request: Request, metrics=Depends(get_metrics), user=Depends(current_user)):
+    snap = metrics.as_dict()
+    return _render(
+        request,
+        "partials/host_metrics_overlays.html",
+        {"metrics": snap, "user": user},
+    )
+
+
 def _parse_instance_revs_json(raw: str) -> dict[str, str]:
     text = (raw or "").strip()
     if not text:
