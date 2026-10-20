@@ -78,7 +78,7 @@ def load_policy_from_mapping(data: Mapping[str, Any], *, config_dir: Path | None
     hm = data.get("host_metrics") or {}
     return Policy(
         git_remote_url=str(git.get("remote_url", "")),
-        allowed_branch_patterns=list(git.get("allowed_branch_patterns") or ["main"]),
+        allowed_branch_patterns=list(git.get("allowed_branch_patterns") or []),
         allowed_tag_patterns=list(git.get("allowed_tag_patterns") or []),
         port_min=int(ports.get("min", 3100)),
         port_max=int(ports.get("max", 3199)),
@@ -112,6 +112,8 @@ def branch_allowed(policy: Policy, branch: str) -> bool:
     branch = branch.strip()
     if not branch:
         return False
+    if not policy.allowed_branch_patterns:
+        return True
     for pat in policy.allowed_branch_patterns:
         if fnmatch.fnmatch(branch, pat):
             return True
@@ -122,6 +124,8 @@ def tag_allowed(policy: Policy, tag: str) -> bool:
     tag = tag.strip()
     if not tag:
         return False
+    if not policy.allowed_tag_patterns:
+        return True
     for pat in policy.allowed_tag_patterns:
         if fnmatch.fnmatch(tag, pat):
             return True

@@ -45,18 +45,22 @@
 </div>
 <div id="instance-source-repo"{% if src_mode == 'path' %} hidden{% endif %}>
   <div class="form-group">
-    <label class="form-label" for="instance-git-tag">Версия (тег)</label>
+    <label class="form-label" for="instance-git-tag-input">Версия (тег)</label>
     <select class="select" name="git_tag" id="instance-git-tag">
       <option value="">— не выбран (ветка / commit) —</option>
       {% for t in tags %}
       <option value="{{ t }}"{% if form.git_tag == t %} selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
+    {% if git_tag_filter_active|default(false) %}
     <p class="field-hint">Если выбран — сборка и деплой идут с этого тега. Список по шаблонам <code>git.allowed_tag_patterns</code> в config.yaml.</p>
+    {% else %}
+    <p class="field-hint">Если выбран — сборка и деплой идут с этого тега.</p>
+    {% endif %}
   </div>
   <div id="instance-source-branch-commit"{% if form.git_tag %} hidden{% endif %}>
-    <div class="form-group"><label class="form-label">Git-ветка</label>
-      <select class="select" name="git_branch" id="instance-git-branch"{% if src_mode != 'path' and not form.git_tag %} required{% endif %}>
+    <div class="form-group"><label class="form-label" for="instance-git-branch-input">Git-ветка</label>
+      <select class="select" name="git_branch" id="instance-git-branch">
         {% set branch_sel = form.git_branch if form.git_branch is defined and form.git_branch else 'main' %}
         {% for b in branches %}
         <option value="{{ b }}"{% if branch_sel == b %} selected{% endif %}>{{ b }}</option>

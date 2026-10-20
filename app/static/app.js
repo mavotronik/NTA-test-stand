@@ -263,6 +263,7 @@
     if (!inner) return;
     openOverlay(document.getElementById('formModal'));
     initInstancePortInput(inner.querySelector('#instance-port'));
+    initInstanceSearchableSelects(inner);
     initInstanceSourceMode(inner);
     if (inner.querySelector('[data-host-metric-modal]')) {
       initHostMetricCharts(inner);
@@ -426,6 +427,177 @@
     }
   });
 
+  function initSearchableSelect(select) {
+    if (!select || select.dataset.searchableBound) return;
+    select.dataset.searchableBound = '1';
+    select.classList.add('searchable-select-native');
+    const wrap = document.createElement('div');
+    wrap.className = 'searchable-select';
+    select.parentNode.insertBefore(wrap, select);
+    wrap.appendChild(select);
+    const allowEmpty = select.id === 'instance-git-tag';
+    const emptyLabel = allowEmpty
+      ? [...select.options].find((o) => o.value === '')?.textContent || '— не выбран —'
+      : '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'input searchable-select-input';
+    input.id = select.id + '-input';
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-expanded', 'false');
+    input.autocomplete = 'off';
+    input.placeholder = allowEmpty ? emptyLabel : 'Поиск…';
+    const list = document.createElement('ul');
+    list.className = 'searchable-select-dropdown';
+    list.id = select.id + '-list';
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    document.body.appendChild(list);
+    input.setAttribute('aria-controls', list.id);
+    wrap.appendChild(input);
+    let open = false;
+    let activeIndex = -1;
+    let userFiltering = false;
+    function syncInputFromSelect() {
+      const opt = select.options[select.selectedIndex];
+      if (allowEmpty && !select.value) {
+        input.value = '';
+        input.placeholder = emptyLabel;
+      } else if (opt) {
+        input.value = opt.textContent;
+        input.placeholder = allowEmpty ? emptyLabel : 'Поиск…';
+      } else {
+        input.value = '';
+      }
+    }
+    function positionList() {
+      const r = input.getBoundingClientRect();
+      list.style.top = Math.round(r.bottom + 4) + 'px';
+      list.style.left = Math.round(r.left) + 'px';
+      list.style.width = Math.round(r.width) + 'px';
+    }
+    function visibleOptions() {
+      const q = userFiltering ? input.value.trim().toLowerCase() : '';
+      return [...select.options].filter((o) => {
+        if (!allowEmpty && o.value === '') return false;
+        if (!q) return true;
+        return o.textContent.toLowerCase().includes(q);
+      });
+    }
+    function optionNodes() {
+      return [...list.querySelectorAll('.searchable-select-option')];
+    }
+    function setActive(idx) {
+      const nodes = optionNodes();
+      nodes.forEach((n, i) => n.classList.toggle('is-active', i === idx));
+      activeIndex = idx;
+      if (idx >= 0 && nodes[idx]) nodes[idx].scrollIntoView({ block: 'nearest' });
+    }
+    function renderList() {
+      list.replaceChildren();
+      const opts = visibleOptions();
+      if (!opts.length) {
+        const li = document.createElement('li');
+        li.className = 'searchable-select-empty';
+        li.textContent = 'Ничего не найдено';
+        list.appendChild(li);
+        activeIndex = -1;
+        return;
+      }
+      opts.forEach((o) => {
+        const li = document.createElement('li');
+        li.className = 'searchable-select-option';
+        li.setAttribute('role', 'option');
+        li.dataset.value = o.value;
+        li.textContent = o.textContent;
+        if (o.value === select.value) li.setAttribute('aria-selected', 'true');
+        li.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          pick(o.value);
+        });
+        list.appendChild(li);
+      });
+      activeIndex = -1;
+    }
+    function openList() {
+      open = true;
+      list.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      renderList();
+      positionList();
+    }
+    function closeList() {
+      open = false;
+      list.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      activeIndex = -1;
+      userFiltering = false;
+      syncInputFromSelect();
+    }
+    function pick(value) {
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      closeList();
+    }
+    function onScrollOrResize() {
+      if (open) positionList();
+    }
+    input.addEventListener('focus', () => {
+      userFiltering = false;
+      openList();
+    });
+    input.addEventListener('input', () => {
+      userFiltering = true;
+      if (!open) openList();
+      else renderList();
+      positionList();
+    });
+    input.addEventListener('blur', () => {
+      setTimeout(closeList, 150);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault();
+        openList();
+        return;
+      }
+      const nodes = optionNodes();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeList();
+        return;
+      }
+      if (e.key === 'ArrowDown' && nodes.length) {
+        e.preventDefault();
+        setActive(Math.min(activeIndex + 1, nodes.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp' && nodes.length) {
+        e.preventDefault();
+        setActive(Math.max(activeIndex - 1, 0));
+        return;
+      }
+      if (e.key === 'Enter' && open && activeIndex >= 0 && nodes[activeIndex]) {
+        e.preventDefault();
+        pick(nodes[activeIndex].dataset.value);
+      }
+    });
+    select.addEventListener('change', syncInputFromSelect);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    select._searchableSync = syncInputFromSelect;
+    select._searchableInput = input;
+    syncInputFromSelect();
+  }
+  function initInstanceSearchableSelects(root) {
+    const scope = root && root.querySelector ? root : document;
+    const form = scope.querySelector('#instance-form') || (scope.id === 'instance-form' ? scope : null);
+    const selects = form
+      ? [form.querySelector('#instance-git-tag'), form.querySelector('#instance-git-branch')]
+      : [scope.querySelector('#instance-git-tag'), scope.querySelector('#instance-git-branch')];
+    selects.filter(Boolean).forEach(initSearchableSelect);
+  }
   function initInstancePortInput(input) {
     const hint = input?.form?.querySelector('#instance-port-error') || document.getElementById('instance-port-error');
     if (!input || !hint || input.dataset.portBound) return;
@@ -472,6 +644,7 @@
     const pathPanel = form.querySelector('#instance-source-path');
     const branchCommitPanel = form.querySelector('#instance-source-branch-commit');
     const branchSelect = form.querySelector('#instance-git-branch');
+    const branchInput = form.querySelector('#instance-git-branch-input');
     const tagSelect = form.querySelector('#instance-git-tag');
     const pathInput = form.querySelector('#instance-source-path-input');
     function syncTagCommit() {
@@ -481,10 +654,12 @@
       if (branchSelect && tagChosen) {
         const mainOpt = [...branchSelect.options].find((o) => o.value === 'main');
         if (mainOpt) branchSelect.value = 'main';
+        if (branchSelect._searchableSync) branchSelect._searchableSync();
       }
-      if (branchSelect) {
-        if (mode === 'path' || tagChosen) branchSelect.removeAttribute('required');
-        else branchSelect.setAttribute('required', '');
+      if (branchSelect) branchSelect.removeAttribute('required');
+      if (branchInput) {
+        if (mode === 'path' || tagChosen) branchInput.removeAttribute('required');
+        else branchInput.setAttribute('required', '');
       }
     }
     function sync() {
@@ -504,6 +679,7 @@
     sync();
   }
   initInstancePortInput(document.getElementById('instance-port'));
+  initInstanceSearchableSelects(document);
   initInstanceSourceMode(document);
 
   const confirmOverlay = document.getElementById('confirmModal');

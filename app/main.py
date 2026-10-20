@@ -921,6 +921,8 @@ def _instance_form_ctx(
         "profiles": list_db_profiles(db),
         "branches": branches,
         "tags": tags,
+        "git_branch_filter_active": bool(settings.policy.allowed_branch_patterns),
+        "git_tag_filter_active": bool(settings.policy.allowed_tag_patterns),
         "port_min": settings.policy.port_min,
         "port_max": settings.policy.port_max,
         "suggested_port": suggested,

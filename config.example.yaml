@@ -18,6 +18,7 @@ manager:
 
 git:
   remote_url: /home/mavotronik/work/GrapesNTA
+  # Необязательно: пустой список или отсутствие ключа — все ветки/теги из репозитория.
   allowed_branch_patterns:
     - main
     - develop

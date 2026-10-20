@@ -34,6 +34,24 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(tag_allowed(policy, "ui-v1.0.16"))
         self.assertFalse(tag_allowed(policy, "detection-v1.0.0"))
 
+    def test_empty_branch_patterns_allow_all(self):
+        policy = load_policy_from_mapping({"git": {"remote_url": "/tmp/r"}})
+        self.assertTrue(branch_allowed(policy, "main"))
+        self.assertTrue(branch_allowed(policy, "secret/experimental"))
+        policy = load_policy_from_mapping(
+            {"git": {"remote_url": "/tmp/r", "allowed_branch_patterns": []}}
+        )
+        self.assertTrue(branch_allowed(policy, "anything/goes"))
+
+    def test_empty_tag_patterns_allow_all(self):
+        policy = load_policy_from_mapping({"git": {"remote_url": "/tmp/r"}})
+        self.assertTrue(tag_allowed(policy, "ui-v1.0.0"))
+        self.assertTrue(tag_allowed(policy, "detection-v1.0.0"))
+        policy = load_policy_from_mapping(
+            {"git": {"remote_url": "/tmp/r", "allowed_tag_patterns": []}}
+        )
+        self.assertTrue(tag_allowed(policy, "secret-v1.0.0"))
+
     def test_host_allowlist(self):
         data = yaml.safe_load(
             (Path(__file__).resolve().parents[1] / "config.example.yaml").read_text(encoding="utf-8")

@@ -1276,6 +1276,61 @@
             color: var(--text-secondary);
         }
 
+        .searchable-select {
+            position: relative;
+        }
+
+        .searchable-select-native {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .searchable-select-dropdown {
+            position: fixed;
+            z-index: 3015;
+            max-height: min(240px, 40vh);
+            overflow: auto;
+            margin: 0;
+            padding: 4px 0;
+            list-style: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow:
+                0 8px 24px
+                color-mix(in srgb, var(--text) 12%, transparent);
+        }
+
+        .searchable-select-option {
+            padding: 8px 11px;
+            font-size: 14px;
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .searchable-select-option:hover,
+        .searchable-select-option.is-active {
+            background: var(--surface-hover);
+        }
+
+        .searchable-select-option[aria-selected="true"] {
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        .searchable-select-empty {
+            padding: 8px 11px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
         .field-error {
             margin-top: 4px;
 

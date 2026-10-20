@@ -63,6 +63,20 @@ class GitTagTests(unittest.TestCase):
             tags = git_service.list_tags(repo, _policy(root), fetch=False)
             self.assertEqual(tags, ["ui-v1.0.0"])
 
+    def test_list_tags_without_policy_patterns_returns_all(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            _init_repo(repo)
+            (repo / "app.txt").write_text("v1\n", encoding="utf-8")
+            _git(repo, "add", "app.txt")
+            _git(repo, "commit", "-m", "c1")
+            _git(repo, "tag", "ui-v1.0.0")
+            _git(repo, "tag", "detection-v1.0.0")
+
+            tags = git_service.list_tags(repo, _policy(root, tag_patterns=[]), fetch=False)
+            self.assertEqual(sorted(tags), ["detection-v1.0.0", "ui-v1.0.0"])
+
     def test_resolve_instance_commit_prefers_git_tag(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
