@@ -832,6 +832,24 @@
     }).then((r) => (r.ok ? r.json() : null));
   }
 
+  const hostMetricChartState = new WeakMap();
+
+  function formatHostMetricValue(value, valueKind, unit) {
+    const n = Number(value);
+    if (Number.isNaN(n)) return '—';
+    if (valueKind === 'load') return n.toFixed(2);
+    return `${n.toFixed(1)}${unit || '%'}`;
+  }
+
+  function formatHostMetricTime(ts) {
+    return new Date(ts * 1000).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
   function setupHostMetricCanvasSize(canvas) {
     const rect = canvas.getBoundingClientRect();
     const w = Math.max(1, Math.floor(rect.width));
@@ -844,28 +862,20 @@
     return { ctx, w, h };
   }
 
-  function drawHostMetricChart(canvas, payload) {
-    const { ctx, w, h } = setupHostMetricCanvasSize(canvas);
-    ctx.clearRect(0, 0, w, h);
-    const palette = readHostMetricPalette();
+  function buildHostMetricLayout(canvas, payload, w, h) {
     const metric = canvas.dataset.metric || payload?.metric || 'cpu';
     const cpuCount = canvas.dataset.cpuCount || payload?.cpu_count || 1;
     const valueKind = payload?.value_kind || (metric === 'load' ? 'load' : 'percent');
+    const unit = payload?.unit ?? (valueKind === 'load' ? '' : '%');
     const points = payload?.points || [];
     const isCardBg = canvas.dataset.chartRole === 'card-bg';
     const pad = isCardBg
       ? { l: 0, r: 0, t: 8, b: 8 }
-      : { l: 4, r: 4, t: 6, b: 6 };
+      : { l: 48, r: 12, t: 14, b: 32 };
     const innerW = w - pad.l - pad.r;
     const innerH = h - pad.t - pad.b;
     if (!points.length) {
-      if (!isCardBg) {
-        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#6b7280';
-        ctx.font = '12px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Накапливаем данные…', w / 2, h / 2 + 4);
-      }
-      return;
+      return { metric, cpuCount, valueKind, unit, points, values: [], pad, innerW, innerH, isCardBg, empty: true };
     }
 
     const values = points.map((p) => Number(p.value));
@@ -888,14 +898,99 @@
     const tMax = points[points.length - 1].ts;
     const tSpan = tMax - tMin || 1;
 
-    function xAt(i) {
+    function xAtIndex(i) {
       return pad.l + ((points[i].ts - tMin) / tSpan) * innerW;
+    }
+    function xAtTs(ts) {
+      return pad.l + ((ts - tMin) / tSpan) * innerW;
     }
     function yAt(val) {
       const ratio = (val - yMin) / (yMax - yMin || 1);
       return pad.t + innerH - ratio * innerH;
     }
 
+    return {
+      metric,
+      cpuCount,
+      valueKind,
+      unit,
+      points,
+      values,
+      pad,
+      innerW,
+      innerH,
+      isCardBg,
+      yMin,
+      yMax,
+      tMin,
+      tMax,
+      tSpan,
+      xAtIndex,
+      xAtTs,
+      yAt,
+      empty: false,
+    };
+  }
+
+  function drawHostMetricAxes(ctx, layout) {
+    const secondary =
+      getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#6b7280';
+    const border = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e1e4e8';
+    const { pad, innerW, innerH, yMin, yMax, valueKind, unit, tMin, tMax, xAtTs } = layout;
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, pad.t);
+    ctx.lineTo(pad.l, pad.t + innerH);
+    ctx.lineTo(pad.l + innerW, pad.t + innerH);
+    ctx.stroke();
+
+    ctx.fillStyle = secondary;
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    const yTicks = valueKind === 'load' ? 4 : 5;
+    for (let i = 0; i <= yTicks; i += 1) {
+      const ratio = i / yTicks;
+      const val = yMax - ratio * (yMax - yMin);
+      const y = pad.t + ratio * innerH;
+      ctx.fillText(formatHostMetricValue(val, valueKind, unit), pad.l - 8, y);
+    }
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const xLabels = [
+      { ts: tMin, align: 'left' },
+      { ts: tMin + (tMax - tMin) / 2, align: 'center' },
+      { ts: tMax, align: 'right' },
+    ];
+    xLabels.forEach(({ ts, align }) => {
+      const x = xAtTs(ts);
+      ctx.textAlign = align;
+      ctx.fillText(formatHostMetricTime(ts), x, pad.t + innerH + 8);
+    });
+  }
+
+  function drawHostMetricChart(canvas, payload) {
+    const { ctx, w, h } = setupHostMetricCanvasSize(canvas);
+    ctx.clearRect(0, 0, w, h);
+    const palette = readHostMetricPalette();
+    const layout = buildHostMetricLayout(canvas, payload, w, h);
+    hostMetricChartState.set(canvas, { layout, payload: payload || {} });
+
+    if (layout.empty) {
+      if (!layout.isCardBg) {
+        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#6b7280';
+        ctx.font = '12px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Накапливаем данные…', w / 2, h / 2 + 4);
+      }
+      return;
+    }
+
+    if (!layout.isCardBg) drawHostMetricAxes(ctx, layout);
+
+    const { points, values, metric, cpuCount, xAtIndex, yAt } = layout;
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
@@ -903,9 +998,9 @@
     for (let i = 1; i < points.length; i += 1) {
       const v0 = values[i - 1];
       const v1 = values[i];
-      const x0 = xAt(i - 1);
+      const x0 = xAtIndex(i - 1);
       const y0 = yAt(v0);
-      const x1 = xAt(i);
+      const x1 = xAtIndex(i);
       const y1 = yAt(v1);
       const steps = 12;
       for (let s = 0; s < steps; s += 1) {
@@ -920,6 +1015,101 @@
         ctx.stroke();
       }
     }
+
+    if (!layout.isCardBg) {
+      const last = points.length - 1;
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#6b7280';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      const unitHint = layout.valueKind === 'load' ? 'load' : layout.unit || '%';
+      ctx.fillText(unitHint, w - 8, h - 6);
+    }
+  }
+
+  function nearestHostMetricPointIndex(layout, mouseX) {
+    const { points, pad, innerW, tMin, tSpan } = layout;
+    if (!points.length || mouseX < pad.l || mouseX > pad.l + innerW) return -1;
+    const rel = (mouseX - pad.l) / innerW;
+    const targetTs = tMin + rel * tSpan;
+    let best = 0;
+    let bestDist = Math.abs(points[0].ts - targetTs);
+    for (let i = 1; i < points.length; i += 1) {
+      const dist = Math.abs(points[i].ts - targetTs);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function drawHostMetricHover(canvas, index) {
+    const stored = hostMetricChartState.get(canvas);
+    if (!stored?.layout || stored.layout.empty || index < 0) return;
+    drawHostMetricChart(canvas, stored.payload);
+    const { layout } = hostMetricChartState.get(canvas);
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const point = layout.points[index];
+    const x = layout.xAtIndex(index);
+    const y = layout.yAt(index.value);
+    const border = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e1e4e8';
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x, layout.pad.t);
+    ctx.lineTo(x, layout.pad.t + layout.innerH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#3b82f6';
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    return { x, y, point };
+  }
+
+  function bindHostMetricModalChart(canvas) {
+    if (canvas.dataset.chartTooltipBound === '1') return;
+    const wrap = canvas.closest('.host-metric-chart-interactive');
+    const tooltip = wrap?.querySelector('.host-metric-chart-tooltip');
+    if (!wrap || !tooltip) return;
+    canvas.dataset.chartTooltipBound = '1';
+
+    function hideTooltip() {
+      tooltip.hidden = true;
+      const stored = hostMetricChartState.get(canvas);
+      if (stored?.payload) drawHostMetricChart(canvas, stored.payload);
+    }
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const stored = hostMetricChartState.get(canvas);
+      if (!stored?.layout || stored.layout.empty || stored.layout.isCardBg) return;
+      const index = nearestHostMetricPointIndex(stored.layout, mouseX);
+      if (index < 0) {
+        hideTooltip();
+        return;
+      }
+      const hover = drawHostMetricHover(canvas, index);
+      if (!hover) return;
+      const { point } = hover;
+      const { valueKind, unit } = stored.layout;
+      tooltip.innerHTML = `<strong>${formatHostMetricTime(point.ts)}</strong>${formatHostMetricValue(point.value, valueKind, unit)}`;
+      tooltip.hidden = false;
+      let left = hover.x;
+      let top = hover.y;
+      const pad = 12;
+      left = Math.max(pad, Math.min(rect.width - pad, left));
+      top = Math.max(pad + 20, top);
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+    });
+
+    canvas.addEventListener('mouseleave', hideTooltip);
   }
 
   function initHostMetricCanvas(canvas) {
@@ -933,6 +1123,7 @@
         if (!payload) return;
         if (payload.cpu_count != null) canvas.dataset.cpuCount = String(payload.cpu_count);
         drawHostMetricChart(canvas, payload);
+        if (!canvas.dataset.chartRole) bindHostMetricModalChart(canvas);
       })
       .catch(() => {})
       .finally(() => {

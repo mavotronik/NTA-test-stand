@@ -5,8 +5,12 @@
     <button type="button" class="icon-button modal-close" data-close-modal aria-label="Закрыть"><span class="mdi mdi-close"></span></button>
   </div>
   <div class="modal-body">
+    <p class="host-metric-chart-units">{{ unit_label }}</p>
     <div class="chart-container host-metric-chart-modal">
-      <canvas class="host-metric-chart-canvas" data-metric="{{ metric }}" data-history-hours="{{ history_hours }}" data-cpu-count="{{ cpu_count }}" aria-label="График {{ metric_label }}"></canvas>
+      <div class="host-metric-chart-interactive">
+        <canvas class="host-metric-chart-canvas" data-metric="{{ metric }}" data-history-hours="{{ history_hours }}" data-cpu-count="{{ cpu_count }}" aria-label="График {{ metric_label }}"></canvas>
+        <div class="host-metric-chart-tooltip" role="tooltip" hidden></div>
+      </div>
     </div>
   </div>
   <div class="modal-footer">

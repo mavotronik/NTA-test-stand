@@ -440,6 +440,13 @@ _HOST_METRIC_LABELS = {
     "load": "Load Average",
 }
 
+_HOST_METRIC_UNIT_LABELS = {
+    "cpu": "загрузка, %",
+    "memory": "использование, %",
+    "disk": "заполнение, %",
+    "load": "средняя нагрузка за 1 мин",
+}
+
 
 def _host_metric_history(
     metric: str,
@@ -466,8 +473,12 @@ def _host_metric_history(
     }
     if metric == "load":
         payload["value_kind"] = "load"
+        payload["unit"] = ""
+        payload["unit_label"] = _HOST_METRIC_UNIT_LABELS[metric]
     else:
         payload["value_kind"] = "percent"
+        payload["unit"] = "%"
+        payload["unit_label"] = _HOST_METRIC_UNIT_LABELS[metric]
     return payload
 
 
@@ -509,6 +520,7 @@ def partial_host_metrics_chart_modal(
             "user": user,
             "metric": metric,
             "metric_label": _HOST_METRIC_LABELS[metric],
+            "unit_label": _HOST_METRIC_UNIT_LABELS[metric],
             "cpu_count": snap.cpu_count,
             "history_hours": 72,
         },

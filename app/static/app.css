@@ -714,12 +714,47 @@
             background: var(--surface-hover);
         }
 
+        .host-metric-chart-units {
+            margin: 0 0 10px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .host-metric-chart-interactive {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .host-metric-chart-tooltip {
+            position: absolute;
+            z-index: 2;
+            pointer-events: none;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: color-mix(in srgb, var(--surface) 94%, transparent);
+            box-shadow: var(--shadow);
+            font-size: 12px;
+            line-height: 1.35;
+            color: var(--text);
+            white-space: nowrap;
+            transform: translate(-50%, calc(-100% - 10px));
+        }
+
+        .host-metric-chart-tooltip strong {
+            display: block;
+            font-weight: 650;
+            margin-bottom: 2px;
+        }
+
         .host-metric-chart-modal.chart-container {
             height: 300px;
         }
 
         .host-metric-chart-modal canvas.host-metric-chart-canvas {
             height: 300px;
+            cursor: crosshair;
         }
 
         .metric-top {
