@@ -1,0 +1,46 @@
+{% set src_mode = form.source_mode if form.source_mode is defined else 'repo' %}
+<div class="form-group" id="image-source-mode-group">
+  <span class="form-label">Источник UI</span>
+  <div class="instance-source-mode-options">
+    <label class="instance-source-mode-option">
+      <input type="radio" name="source_mode" value="repo"{% if src_mode != 'path' %} checked{% endif %}>
+      Из репозитория
+    </label>
+    <label class="instance-source-mode-option">
+      <input type="radio" name="source_mode" value="path"{% if src_mode == 'path' %} checked{% endif %}>
+      Пользовательский путь
+    </label>
+  </div>
+</div>
+<div id="image-source-repo"{% if src_mode == 'path' %} hidden{% endif %}>
+  <div class="form-group">
+    <label class="form-label" for="image-git-tag">Версия (тег)</label>
+    <select class="select" name="git_tag" id="image-git-tag">
+      <option value="">— не выбран (ветка / commit) —</option>
+      {% for t in tags %}
+      <option value="{{ t }}"{% if form.git_tag == t %} selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div id="image-source-branch-commit"{% if form.git_tag %} hidden{% endif %}>
+    <div class="form-group">
+      <label class="form-label" for="image-git-branch">Git-ветка</label>
+      <select class="select" name="git_branch" id="image-git-branch">
+        {% set branch_sel = form.git_branch if form.git_branch is defined and form.git_branch else 'main' %}
+        {% for b in branches %}
+        <option value="{{ b }}"{% if branch_sel == b %} selected{% endif %}>{{ b }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Commit (необязательно)</label>
+      <input class="input" name="git_commit" id="image-git-commit" placeholder="полный SHA или короткий" value="{{ form.git_commit or '' }}" autocomplete="off">
+    </div>
+  </div>
+</div>
+<div id="image-source-path"{% if src_mode != 'path' %} hidden{% endif %}>
+  <div class="form-group">
+    <label class="form-label" for="image-source-path-input">Каталог GrapesNTA</label>
+    <input class="input" id="image-source-path-input" name="source_path" placeholder="/home/tester/GrapesNTA" value="{{ form.source_path or '' }}" autocomplete="off">
+  </div>
+</div>

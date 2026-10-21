@@ -123,7 +123,7 @@ class JobWorker:
                 """
                 SELECT j.*, i.slug, i.port, i.db_profile_id, i.git_branch
                 FROM deployment_jobs j
-                JOIN instances i ON i.id = j.instance_id
+                LEFT JOIN instances i ON i.id = j.instance_id
                 WHERE j.status = 'queued'
                 ORDER BY j.created_at
                 LIMIT 50
@@ -160,6 +160,16 @@ class JobWorker:
                 self._building += 1
             try:
                 self._run_build(dict(job))
+            finally:
+                with self._lock:
+                    self._building -= 1
+        elif job_type == "image_build":
+            with self._lock:
+                if self._building >= build_max:
+                    return
+                self._building += 1
+            try:
+                self._run_image_build(dict(job))
             finally:
                 with self._lock:
                     self._building -= 1
@@ -344,6 +354,16 @@ class JobWorker:
             return
         self._run_deploy(job)
 
+    @staticmethod
+    def _build_source_dict(source: dict) -> dict:
+        return {
+            "source_mode": source.get("source_mode") or "repo",
+            "source_path": source.get("source_path") or "",
+            "git_branch": source.get("git_branch") or "main",
+            "git_commit": source.get("git_commit") or "",
+            "git_tag": source.get("git_tag") or "",
+        }
+
     def _resolve_instance_build_context(self, inst: dict) -> _InstanceBuildContext:
         if is_path_source(inst):
             layout = resolve_path_layout(inst)
@@ -399,7 +419,6 @@ class JobWorker:
 
     def _run_build(self, job: dict, *, defer_deploy: bool = False) -> None:
         job_id = job["id"]
-        active_build_id: str | None = None
         logs = JobLogBatcher(self.db, job_id)
         self._set_job(job_id, "running", "resolve_commit")
         try:
@@ -410,43 +429,123 @@ class JobWorker:
             if not inst_row:
                 raise RuntimeError("instance missing")
             inst = dict(inst_row)
-            bc = self._resolve_instance_build_context(inst)
-            logs.append(bc.log_label)
-            ctx = bc.context
-            bkey = bc.build_key
-            ui_compose_dir = bc.compose_dir
-            logs.append(f"context {ctx}")
+            self._run_build_core(
+                job_id,
+                logs,
+                source=inst,
+                preset_build_id=job.get("build_id"),
+                defer_deploy=defer_deploy,
+            )
+        except Exception as err:
+            logs.append(f"ERROR: {err}")
+            logs.flush()
+            self._set_job(job_id, "failed", "error", error=str(err))
+
+    def _run_image_build(self, job: dict) -> None:
+        job_id = job["id"]
+        logs = JobLogBatcher(self.db, job_id)
+        self._set_job(job_id, "running", "resolve_commit")
+        try:
+            build_id = job.get("build_id")
+            if not build_id:
+                raise RuntimeError("build missing on image_build job")
             with self.db.connection() as conn:
-                existing = conn.execute(
-                    "SELECT * FROM builds WHERE build_key=? AND status='ready' ORDER BY created_at DESC LIMIT 1",
-                    (bkey,),
+                build_row = conn.execute(
+                    "SELECT * FROM builds WHERE id=?", (build_id,)
                 ).fetchone()
-            if existing:
-                logs.append(f"reuse image {existing['image_tag']}")
-                logs.flush()
-                if defer_deploy:
-                    self._set_job(job_id, "running", "deploy", build_id=existing["id"])
-                else:
-                    self._set_job(job_id, "done", "ready", build_id=existing["id"])
-                return
-            build_id = job.get("build_id") or new_id()
-            active_build_id = build_id
-            tag = bc.image_tag
-            self._set_job(job_id, "running", "docker_build", build_id=build_id)
-            with self.db.connection() as conn:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO builds(id, build_key, git_commit, status, image_tag, created_at)
-                    VALUES (?,?,?,?,?,?)
-                    """,
-                    (build_id, bkey, bc.build_git_commit, "building", tag, utc_now()),
-                )
+            if not build_row:
+                raise RuntimeError("build record missing")
+            source = self._build_source_dict(dict(build_row))
+            self._run_build_core(
+                job_id,
+                logs,
+                source=source,
+                preset_build_id=build_id,
+                defer_deploy=False,
+            )
+        except Exception as err:
+            logs.append(f"ERROR: {err}")
+            logs.flush()
+            if job.get("build_id"):
+                mark_build_failed(self.db, job["build_id"], str(err))
+            self._set_job(job_id, "failed", "error", error=str(err))
 
-            def log_cb(line: str) -> None:
-                logs.append(line)
-                logs.flush()
+    def _run_build_core(
+        self,
+        job_id: str,
+        logs: JobLogBatcher,
+        *,
+        source: dict,
+        preset_build_id: str | None,
+        defer_deploy: bool,
+    ) -> None:
+        active_build_id: str | None = None
+        src = self._build_source_dict(source)
+        bc = self._resolve_instance_build_context(src)
+        logs.append(bc.log_label)
+        ctx = bc.context
+        bkey = bc.build_key
+        ui_compose_dir = bc.compose_dir
+        logs.append(f"context {ctx}")
+        with self.db.connection() as conn:
+            existing = conn.execute(
+                "SELECT * FROM builds WHERE build_key=? AND status='ready' ORDER BY created_at DESC LIMIT 1",
+                (bkey,),
+            ).fetchone()
+        if existing:
+            logs.append(f"reuse image {existing['image_tag']}")
+            logs.flush()
+            if preset_build_id and preset_build_id != existing["id"]:
+                with self.db.connection() as conn:
+                    conn.execute(
+                        """
+                        UPDATE builds SET status='removed', error=?, finished_at=COALESCE(finished_at, ?)
+                        WHERE id=?
+                        """,
+                        (
+                            f"reused existing image {existing['image_tag']}",
+                            utc_now(),
+                            preset_build_id,
+                        ),
+                    )
+            if defer_deploy:
+                self._set_job(job_id, "running", "deploy", build_id=existing["id"])
+            else:
+                self._set_job(job_id, "done", "ready", build_id=existing["id"])
+            return
+        build_id = preset_build_id or new_id()
+        active_build_id = build_id
+        tag = bc.image_tag
+        self._set_job(job_id, "running", "docker_build", build_id=build_id)
+        now = utc_now()
+        with self.db.connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO builds(
+                  id, build_key, git_commit, status, image_tag, created_at,
+                  source_mode, source_path, git_branch, git_tag
+                ) VALUES (?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    build_id,
+                    bkey,
+                    bc.build_git_commit,
+                    "building",
+                    tag,
+                    now,
+                    src["source_mode"],
+                    src["source_path"],
+                    src["git_branch"],
+                    src["git_tag"],
+                ),
+            )
 
-            build_date = utc_now()
+        def log_cb(line: str) -> None:
+            logs.append(line)
+            logs.flush()
+
+        build_date = utc_now()
+        try:
             if self.docker.can_compose_ui_build(ui_compose_dir):
                 logs.append(f"ui image build in {ui_compose_dir}")
                 logs.flush()
@@ -484,6 +583,7 @@ class JobWorker:
             if active_build_id:
                 mark_build_failed(self.db, active_build_id, str(err))
             self._set_job(job_id, "failed", "error", error=str(err))
+            raise
 
     def _run_deploy(self, job: dict) -> None:
         job_id = job["id"]

@@ -9,6 +9,7 @@
   <form method="post" action="{% if instance %}/instances/{{ instance.id }}/edit{% else %}/instances/new{% endif %}" id="instance-form">
     <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
     <input type="hidden" name="return_to" value="{{ return_to }}">
+    {% if deploy_after_create|default(false) %}<input type="hidden" name="deploy_after_create" value="1">{% endif %}
     <div class="modal-body modal-body-form">
       {% if flash_message %}<p class="modal-form-note">{{ flash_message }}</p>{% endif %}
       {% if flash_error %}<p class="modal-form-error">{{ flash_error }}</p>{% endif %}

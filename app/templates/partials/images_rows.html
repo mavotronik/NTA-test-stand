@@ -1,0 +1,77 @@
+{% for item in image_rows %}
+{% set row = item.row %}
+<tr data-image-id="{{ row.short_id }}" data-image-rev="{{ item.row_rev }}">
+  <td>
+    {% if row.tags %}
+      {% for t in row.tags %}<code class="images-tag">{{ t }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+    {% else %}<span style="color:var(--text-secondary);">&lt;без тега&gt;</span>{% endif %}
+    {% if row.git_commit %}<div class="field-hint">{{ row.git_commit }}</div>{% endif %}
+  </td>
+  <td><code>{{ row.short_id }}</code></td>
+  <td>{{ row.size_label }}</td>
+  <td>{{ row.created }}</td>
+  <td>
+    {% if row.in_use_now %}
+    <span class="status"><span class="status-dot status-online"></span> занят сейчас</span>
+    {% elif row.in_use %}
+    <span class="status"><span class="status-dot status-warning"></span> привязан</span>
+    {% else %}
+    <span class="status"><span class="status-dot status-offline"></span> свободен</span>
+    {% endif %}
+  </td>
+  <td class="images-usages-cell">
+    {% if row.usages %}
+    <ul class="images-usages-list">
+      {% for u in row.usages %}
+      <li>
+        {% if u.kind == 'instance' %}
+        <span class="mdi mdi-server-outline" aria-hidden="true"></span>
+        {% if u.href %}<a href="{{ u.href }}">{{ u.label }}</a>{% else %}{{ u.label }}{% endif %}
+        <span class="field-hint">{% if u.role == 'rollback' %}откат{% else %}текущий{% endif %} · {{ u.detail }}</span>
+        {% else %}
+        <span class="mdi mdi-docker" aria-hidden="true"></span>
+        <code>{{ u.label }}</code>
+        <span class="field-hint">{{ u.detail }}</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}—{% endif %}
+  </td>
+  <td class="images-actions-cell">
+    {% if user.role in ('admin', 'operator') %}
+    {% with url=item.deploy_modal_path, label="Развернуть", icon="mdi-rocket-launch-outline", extra_class="button primary" %}{% include "partials/form_modal_link.html" %}{% endwith %}
+    {% if item.has_instance_links %}
+    <form method="post" action="/images/unlink" style="display:inline;"
+          {% if item.can_unlink %}
+          data-confirm
+          data-confirm-title="Отвязать образ?"
+          data-confirm-message="Образ будет снят с полей image_tag и отката у связанных инстансов. Контейнеры и файлы образа на хосте не удаляются."
+          data-confirm-ok="Отвязать"
+          data-confirm-tone="warning"
+          data-confirm-icon="mdi-link-variant-off"
+          {% endif %}>
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <input type="hidden" name="image_id" value="{{ row.image_id }}">
+      <button class="button warning" type="submit"{% if not item.can_unlink %} disabled title="Нельзя отвязать, пока образ занят (запущен инстанс или контейнер)"{% endif %}><span class="mdi mdi-link-variant-off"></span> Отвязать</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/images/delete" style="display:inline;"
+          {% if row.deletable %}
+          data-confirm
+          data-confirm-title="Удалить образ?"
+          data-confirm-message="Образ {{ row.short_id }} будет удалён с хоста."
+          data-confirm-ok="Удалить"
+          data-confirm-tone="danger"
+          data-confirm-icon="mdi-delete"
+          {% endif %}>
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <input type="hidden" name="image_id" value="{{ row.image_id }}">
+      <button class="button danger images-delete-btn" type="submit" title="{% if row.deletable %}Удалить{% else %}Образ используется{% endif %}" aria-label="Удалить"{% if not row.deletable %} disabled{% endif %}><span class="mdi mdi-delete"></span></button>
+    </form>
+    {% endif %}
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="7">Образы стенда не найдены. Соберите образ или разверните инстанс.</td></tr>
+{% endfor %}

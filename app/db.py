@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 MIGRATION_SQL = """
 PRAGMA journal_mode=WAL;
@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS builds (
   image_id TEXT NOT NULL DEFAULT '',
   log_path TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
+  source_mode TEXT NOT NULL DEFAULT 'repo',
+  source_path TEXT NOT NULL DEFAULT '',
+  git_branch TEXT NOT NULL DEFAULT 'main',
+  git_tag TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   finished_at TEXT
 );
@@ -109,7 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_builds_status ON builds(status);
 
 CREATE TABLE IF NOT EXISTS deployment_jobs (
   id TEXT PRIMARY KEY,
-  instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+  instance_id TEXT REFERENCES instances(id) ON DELETE CASCADE,
   job_type TEXT NOT NULL,
   status TEXT NOT NULL,
   stage TEXT NOT NULL DEFAULT '',
@@ -196,6 +200,111 @@ class Database:
             conn.execute(
                 "ALTER TABLE instances ADD COLUMN git_tag TEXT NOT NULL DEFAULT ''"
             )
+
+        build_cols = {row[1] for row in conn.execute("PRAGMA table_info(builds)").fetchall()}
+        if "source_mode" not in build_cols:
+            conn.execute(
+                "ALTER TABLE builds ADD COLUMN source_mode TEXT NOT NULL DEFAULT 'repo'"
+            )
+        if "source_path" not in build_cols:
+            conn.execute(
+                "ALTER TABLE builds ADD COLUMN source_path TEXT NOT NULL DEFAULT ''"
+            )
+        if "git_branch" not in build_cols:
+            conn.execute(
+                "ALTER TABLE builds ADD COLUMN git_branch TEXT NOT NULL DEFAULT 'main'"
+            )
+        if "git_tag" not in build_cols:
+            conn.execute(
+                "ALTER TABLE builds ADD COLUMN git_tag TEXT NOT NULL DEFAULT ''"
+            )
+
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        job_cols = {}
+        if "deployment_jobs" in tables:
+            job_cols = {
+                row[1]: row
+                for row in conn.execute("PRAGMA table_info(deployment_jobs)").fetchall()
+            }
+        needs_nullable = bool(
+            job_cols and job_cols.get("instance_id", (None, None, None, 1))[3] == 1
+        )
+        if "deployment_jobs_v3" in tables or needs_nullable:
+            self._migrate_deployment_jobs_nullable_instance(conn)
+
+    @staticmethod
+    def _migrate_deployment_jobs_nullable_instance(conn: sqlite3.Connection) -> None:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        has_old = "deployment_jobs" in tables
+        has_v3 = "deployment_jobs_v3" in tables
+
+        if has_v3 and has_old:
+            conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("DROP TABLE deployment_jobs")
+            conn.execute("ALTER TABLE deployment_jobs_v3 RENAME TO deployment_jobs")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_instance ON deployment_jobs(instance_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_status ON deployment_jobs(status)"
+            )
+            conn.execute("PRAGMA foreign_keys=ON")
+            return
+
+        if has_v3 and not has_old:
+            conn.execute("ALTER TABLE deployment_jobs_v3 RENAME TO deployment_jobs")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_instance ON deployment_jobs(instance_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_status ON deployment_jobs(status)"
+            )
+            return
+
+        if not has_old:
+            return
+
+        conn.executescript(
+            """
+            PRAGMA foreign_keys=OFF;
+            CREATE TABLE deployment_jobs_v3 (
+              id TEXT PRIMARY KEY,
+              instance_id TEXT REFERENCES instances(id) ON DELETE CASCADE,
+              job_type TEXT NOT NULL,
+              status TEXT NOT NULL,
+              stage TEXT NOT NULL DEFAULT '',
+              build_id TEXT REFERENCES builds(id),
+              requested_by TEXT REFERENCES users(id),
+              error TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL,
+              started_at TEXT,
+              finished_at TEXT
+            );
+            INSERT INTO deployment_jobs_v3(
+              id, instance_id, job_type, status, stage, build_id, requested_by,
+              error, created_at, started_at, finished_at
+            )
+            SELECT
+              id, instance_id, job_type, status, stage, build_id, requested_by,
+              error, created_at, started_at, finished_at
+            FROM deployment_jobs;
+            DROP TABLE deployment_jobs;
+            ALTER TABLE deployment_jobs_v3 RENAME TO deployment_jobs;
+            CREATE INDEX IF NOT EXISTS idx_jobs_instance ON deployment_jobs(instance_id);
+            CREATE INDEX IF NOT EXISTS idx_jobs_status ON deployment_jobs(status);
+            PRAGMA foreign_keys=ON;
+            """
+        )
 
     def _init_schema(self) -> None:
         with self._schema_lock:

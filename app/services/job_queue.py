@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-BUILD_DEPLOY_JOB_TYPES = ("build", "deploy", "build_run")
+BUILD_DEPLOY_JOB_TYPES = ("build", "deploy", "build_run", "image_build")
 LIFECYCLE_JOB_TYPES = ("instance_stop", "instance_start", "instance_delete", "instance_rollback")
 
 
@@ -20,7 +20,7 @@ def pick_next_queued_job(
         return lifecycle[0]
     for job in queued:
         jt = job.get("job_type")
-        if jt == "build" and building < build_max:
+        if jt in ("build", "image_build") and building < build_max:
             return job
         if jt == "deploy" and deploying < deploy_max:
             return job

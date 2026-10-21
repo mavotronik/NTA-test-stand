@@ -465,6 +465,42 @@ class DockerService:
             time.sleep(interval_sec)
         return False
 
+    def list_docker_images_raw(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for img in self.client.images.list(all=True):
+            tags = list(img.tags or [])
+            out.append(
+                {
+                    "id": img.id or "",
+                    "tags": tags,
+                    "size": int(getattr(img, "attrs", {}).get("Size") or 0),
+                    "created": getattr(img, "attrs", {}).get("Created"),
+                }
+            )
+        return out
+
+    def list_containers_with_images(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for c in self.client.containers.list(all=True):
+            c.reload()
+            image_id = c.image.id if c.image else ""
+            out.append(
+                {
+                    "name": c.name,
+                    "id": c.short_id,
+                    "status": c.status,
+                    "image": (c.image.tags[0] if c.image and c.image.tags else image_id),
+                    "image_id": image_id,
+                }
+            )
+        return sorted(out, key=lambda x: x["name"])
+
+    def remove_image(self, image_id: str, *, force: bool = False) -> None:
+        iid = (image_id or "").strip()
+        if not iid:
+            raise RuntimeError("image id required")
+        self.client.images.remove(iid, force=force)
+
     def list_grapes_test_containers(self) -> list[dict[str, Any]]:
         out = []
         for c in self.client.containers.list(all=True):

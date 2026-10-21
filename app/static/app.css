@@ -609,6 +609,16 @@
             filter: brightness(0.92);
         }
 
+        .button.warning {
+            border-color: var(--warning);
+            background: var(--warning);
+            color: #1a1200;
+        }
+
+        .button.warning:hover {
+            filter: brightness(0.94);
+        }
+
         .button:disabled {
             opacity: 0.55;
             cursor: not-allowed;
@@ -1890,4 +1900,97 @@
                 margin-left: 0;
             }
         }
+        .images-build-card {
+            margin-bottom: 16px;
+            padding: 16px 18px 18px;
+        }
+
+        .card-section-title {
+            margin: 0 0 8px;
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .images-tag {
+            display: inline-block;
+            margin: 0 4px 4px 0;
+        }
+
+        .images-usages-list {
+            margin: 0;
+            padding-left: 0;
+            list-style: none;
+            font-size: 13px;
+        }
+
+        .images-usages-list li + li {
+            margin-top: 6px;
+        }
+
+        .images-table-wrap {
+            max-width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .images-table td,
+        .images-table th {
+            vertical-align: top;
+        }
+
+        .images-table td:first-child,
+        .images-table th:first-child {
+            white-space: normal;
+            max-width: min(300px, 38vw);
+            word-break: break-word;
+        }
+
+        .images-table .images-usages-cell {
+            white-space: normal;
+            max-width: min(260px, 32vw);
+        }
+
+        .images-table th:last-child,
+        .images-table .images-actions-cell {
+            position: sticky;
+            right: 0;
+            z-index: 2;
+            background: var(--surface);
+            box-shadow: -10px 0 14px -12px rgba(0, 0, 0, 0.35);
+        }
+
+        .images-table thead th:last-child {
+            z-index: 3;
+            background: var(--surface-hover);
+        }
+
+        .images-actions-cell {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            justify-content: flex-end;
+            white-space: normal;
+            min-width: 12.5rem;
+            padding-left: 12px;
+        }
+
+        .images-actions-cell form {
+            display: inline-flex;
+            margin: 0;
+        }
+
+        .images-delete-btn {
+            min-width: 2.25rem;
+            padding-left: 10px;
+            padding-right: 10px;
+        }
+
+        .images-delete-btn .mdi {
+            margin: 0;
+        }
+
 .htmx-indicator{opacity:.4;}

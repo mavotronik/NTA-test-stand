@@ -50,6 +50,7 @@ from app.services.self_update import SelfUpdateError, snapshot_to_dict
 from app.repositories import (
     create_instance,
     delete_db_profile,
+    find_build_by_image_tag,
     find_build_retry_instance,
     get_build,
     get_db_profile,
@@ -58,6 +59,7 @@ from app.repositories import (
     get_instance_job,
     list_audit,
     list_builds,
+    list_builds_for_inventory,
     list_db_profiles,
     instances_for_list_template,
     list_instances,
@@ -65,6 +67,7 @@ from app.repositories import (
     list_jobs,
     list_occupied_ports,
     list_ready_build_images,
+    mark_builds_removed_for_image,
     list_users,
     get_user,
     set_user_password,
@@ -72,7 +75,9 @@ from app.repositories import (
     delete_user,
     next_free_port,
     port_owner,
+    queue_image_build,
     queue_job,
+    unlink_image_tags_from_instances,
     save_db_profile,
     update_instance,
     update_profile_check,
@@ -83,6 +88,11 @@ from app.services.clickhouse_check import check_clickhouse_connection
 from app.services import git_service
 from app.services.ui_source import UiSourceError, find_ui_layout, normalize_source_path
 from app.services.docker_service import DockerService
+from app.services.image_inventory import (
+    StandImageRow,
+    image_row_rev,
+    merge_stand_image_rows,
+)
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -138,7 +148,35 @@ JOB_TYPE_LABELS: dict[str, str] = {
     "instance_start": "Запуск инстанса",
     "instance_delete": "Удаление инстанса",
     "instance_rollback": "Откат образа",
+    "image_build": "Сборка образа",
 }
+
+
+def _stand_image_rows(db: Database, docker: DockerService) -> list[StandImageRow]:
+    try:
+        docker_images = docker.list_docker_images_raw()
+        containers = docker.list_containers_with_images()
+    except Exception:
+        docker_images = []
+        containers = []
+    return merge_stand_image_rows(
+        docker_images,
+        list_instances(db),
+        containers,
+        list_builds_for_inventory(db),
+    )
+
+
+def _parse_image_revs_json(raw: str) -> dict[str, str]:
+    if not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items()}
 
 
 def _job_log_lines(db: Database, job_id: str, *, after_id: int = 0) -> list[dict[str, Any]]:
@@ -622,11 +660,30 @@ async def partial_instance_new_form(
     user=Depends(current_user),
 ):
     require_role(user, "operator")
-    ctx = _instance_form_ctx(db, settings, pull=True)
+    prefill_keys = (
+        "image_tag",
+        "source_mode",
+        "source_path",
+        "git_branch",
+        "git_commit",
+        "git_tag",
+    )
+    prefill = {
+        k: request.query_params.get(k, "")
+        for k in prefill_keys
+        if (request.query_params.get(k, "") or "").strip()
+    }
+    ctx = _instance_form_ctx(db, settings, pull=True, form=prefill or None)
+    deploy_after = request.query_params.get("deploy_after", "") == "1"
     return _render(
         request,
         "partials/instance_form_dialog.html",
-        {"user": user, **_form_flash(request), **ctx},
+        {
+            "user": user,
+            **_form_flash(request),
+            **ctx,
+            "deploy_after_create": deploy_after,
+        },
     )
 
 
@@ -1093,10 +1150,12 @@ async def instance_new_post(
     source_path: str = Form(""),
     image_tag: str = Form(""),
     return_to: str = Form(""),
+    deploy_after_create: str = Form(""),
     csrf_token: str = Form(""),
     db: Database = Depends(get_db),
     settings=Depends(get_settings),
     user=Depends(current_user),
+    _worker=Depends(get_worker),
 ):
     require_role(user, "operator")
     verify_csrf(request, user, csrf_token)
@@ -1176,7 +1235,25 @@ async def instance_new_post(
         target_id=iid,
         ip=_client_ip(request),
     )
-    return RedirectResponse(f"/instances/{iid}", status_code=302)
+    redirect = f"/instances/{iid}"
+    if deploy_after_create == "1" and image_tag.strip():
+        try:
+            jid = queue_job(db, iid, "deploy", user["id"])
+            write_audit(
+                db,
+                user_id=user["id"],
+                username=user["username"],
+                role=user["role"],
+                action="deploy_queue",
+                target_type="job",
+                target_id=jid,
+                detail={"from": "images_deploy"},
+                ip=_client_ip(request),
+            )
+            redirect = f"/instances/{iid}?job={jid}"
+        except ValueError:
+            redirect = f"/instances/{iid}?error=deploy+queue+failed"
+    return RedirectResponse(redirect, status_code=302)
 
 
 @app.get("/instances/{instance_id}/edit", response_class=HTMLResponse)
@@ -1954,6 +2031,265 @@ async def database_delete(
     return RedirectResponse("/databases?message=profile+deleted", status_code=302)
 
 
+def _images_template_rows(db: Database, rows: list[StandImageRow]) -> list[dict[str, Any]]:
+    build_by_id = {
+        b["id"]: b for b in list_builds_for_inventory(db) if b.get("id")
+    }
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        build = None
+        if row.build_id and row.build_id in build_by_id:
+            build = build_by_id[row.build_id]
+        elif row.tags:
+            build = find_build_by_image_tag(db, row.tags[0])
+        has_instance_links = any(u.kind == "instance" for u in row.usages)
+        out.append(
+            {
+                "row": row,
+                "row_rev": image_row_rev(row),
+                "deploy_modal_path": f"/partials/instances/new?{_image_deploy_query_params(row, build)}",
+                "has_instance_links": has_instance_links,
+                "can_unlink": has_instance_links and not row.in_use_now,
+            }
+        )
+    return out
+
+
+def _image_deploy_query_params(row: StandImageRow, build: dict[str, Any] | None) -> str:
+    tag = row.tags[0] if row.tags else ""
+    params: list[tuple[str, str]] = [("deploy_after", "1")]
+    if tag:
+        params.append(("image_tag", tag))
+    if build:
+        params.append(("source_mode", build.get("source_mode") or "repo"))
+        if (build.get("source_path") or "").strip():
+            params.append(("source_path", build.get("source_path") or ""))
+        if (build.get("git_tag") or "").strip():
+            params.append(("git_tag", build.get("git_tag") or ""))
+        elif (build.get("git_branch") or "").strip():
+            params.append(("git_branch", build.get("git_branch") or "main"))
+        if (build.get("git_commit") or "").strip() and not (build.get("git_tag") or "").strip():
+            params.append(("git_commit", build.get("git_commit") or ""))
+    return "&".join(f"{quote(k)}={quote(v)}" for k, v in params)
+
+
+@app.get("/images", response_class=HTMLResponse)
+async def images_page(
+    request: Request,
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+):
+    docker = DockerService()
+    rows = _stand_image_rows(db, docker)
+    return _render(
+        request,
+        "images.html",
+        {
+            "user": user,
+            "active": "images",
+            "image_rows": _images_template_rows(db, rows),
+            "build_ctx": _instance_form_ctx(db, settings, pull=True),
+            "message": request.query_params.get("message", "").replace("+", " "),
+            "error": request.query_params.get("error", "").replace("+", " "),
+        },
+    )
+
+
+@app.get("/partials/images-rows", response_class=HTMLResponse)
+async def partial_images_rows(
+    request: Request,
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    docker = DockerService()
+    rows = _stand_image_rows(db, docker)
+    server_revs = {row.short_id: image_row_rev(row) for row in rows}
+    client_revs = _parse_image_revs_json(request.query_params.get("revs", ""))
+    if client_revs == server_revs:
+        return Response(status_code=204)
+    return _render(
+        request,
+        "partials/images_rows.html",
+        {
+            "user": user,
+            "image_rows": _images_template_rows(db, rows),
+        },
+    )
+
+
+@app.post("/images/build")
+async def images_build_post(
+    request: Request,
+    git_branch: str = Form(""),
+    git_commit: str = Form(""),
+    git_tag: str = Form(""),
+    source_mode: str = Form("repo"),
+    source_path: str = Form(""),
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    settings=Depends(get_settings),
+    user=Depends(current_user),
+    _worker=Depends(get_worker),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    try:
+        branch, commit_pin, src_mode, src_path, tag_pin = _resolve_instance_source_fields(
+            settings,
+            source_mode=source_mode,
+            source_path=source_path,
+            git_branch=git_branch,
+            git_commit=git_commit,
+            git_tag=git_tag,
+        )
+    except (ValueError, UiSourceError, git_service.GitError) as err:
+        return RedirectResponse(f"/images?error={quote(str(err))}", status_code=302)
+    try:
+        jid = queue_image_build(
+            db,
+            user["id"],
+            source_mode=src_mode,
+            source_path=src_path,
+            git_branch=branch,
+            git_commit=commit_pin,
+            git_tag=tag_pin,
+        )
+    except ValueError as err:
+        return RedirectResponse(f"/images?error={quote(str(err))}", status_code=302)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="image_build_queue",
+        target_type="job",
+        target_id=jid,
+        ip=_client_ip(request),
+    )
+    return RedirectResponse(f"/deployments/{jid}", status_code=302)
+
+
+@app.post("/images/unlink")
+async def images_unlink_post(
+    request: Request,
+    image_id: str = Form(...),
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    docker = DockerService()
+    rows = _stand_image_rows(db, docker)
+    target = next((r for r in rows if r.image_id == image_id), None)
+    if not target:
+        return RedirectResponse("/images?error=image+not+found", status_code=302)
+    has_instance_links = any(u.kind == "instance" for u in target.usages)
+    if not has_instance_links:
+        return RedirectResponse("/images?error=nothing+to+unlink", status_code=302)
+    if target.in_use_now:
+        return RedirectResponse(
+            "/images?error=unlink+blocked+while+image+in+use",
+            status_code=302,
+        )
+    affected = unlink_image_tags_from_instances(
+        db,
+        target.tags,
+        user_id=user["id"],
+    )
+    if not affected:
+        return RedirectResponse("/images?error=nothing+to+unlink", status_code=302)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="image_unlink",
+        target_type="docker_image",
+        target_id=target.short_id,
+        detail={"tags": target.tags, "instances": affected},
+        ip=_client_ip(request),
+    )
+    return RedirectResponse("/images?message=image+unlinked", status_code=302)
+
+
+@app.post("/images/delete")
+async def images_delete_post(
+    request: Request,
+    image_id: str = Form(...),
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    docker = DockerService()
+    rows = _stand_image_rows(db, docker)
+    target = next((r for r in rows if r.image_id == image_id), None)
+    if not target:
+        return RedirectResponse("/images?error=image+not+found", status_code=302)
+    if not target.deletable:
+        return RedirectResponse("/images?error=image+in+use", status_code=302)
+    try:
+        docker.remove_image(image_id)
+    except Exception as err:
+        return RedirectResponse(f"/images?error={quote(str(err))}", status_code=302)
+    mark_builds_removed_for_image(db, image_id=image_id, tags=target.tags)
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="image_delete",
+        target_type="docker_image",
+        target_id=target.short_id,
+        detail={"tags": target.tags},
+        ip=_client_ip(request),
+    )
+    return RedirectResponse("/images?message=image+deleted", status_code=302)
+
+
+@app.post("/images/prune-unused")
+async def images_prune_unused_post(
+    request: Request,
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    docker = DockerService()
+    rows = _stand_image_rows(db, docker)
+    removed = 0
+    errors: list[str] = []
+    for row in rows:
+        if not row.deletable:
+            continue
+        try:
+            docker.remove_image(row.image_id)
+            mark_builds_removed_for_image(db, image_id=row.image_id, tags=row.tags)
+            removed += 1
+        except Exception as err:
+            errors.append(str(err))
+    write_audit(
+        db,
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        action="images_prune_unused",
+        target_type="docker_image",
+        detail={"removed": removed, "errors": errors[:5]},
+        ip=_client_ip(request),
+    )
+    if errors and not removed:
+        return RedirectResponse(f"/images?error={quote(errors[0])}", status_code=302)
+    msg = f"removed+{removed}"
+    if errors:
+        msg += f"&error={quote('часть образов не удалена')}"
+    return RedirectResponse(f"/images?message={msg}", status_code=302)
+
+
 @app.get("/builds", response_class=HTMLResponse)
 async def builds_page(request: Request, db: Database = Depends(get_db), user=Depends(current_user)):
     return _render(
@@ -2008,7 +2344,16 @@ async def build_retry(
 
 @app.get("/deployments", response_class=HTMLResponse)
 async def deployments_page(request: Request, db: Database = Depends(get_db), user=Depends(current_user)):
-    return _render(request, "deployments.html", {"user": user, "active": "deployments", "jobs": list_jobs(db)})
+    return _render(
+        request,
+        "deployments.html",
+        {
+            "user": user,
+            "active": "deployments",
+            "jobs": list_jobs(db),
+            "job_type_labels": JOB_TYPE_LABELS,
+        },
+    )
 
 
 @app.get("/deployments/{job_id}", response_class=HTMLResponse)

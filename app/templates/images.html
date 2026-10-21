@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Образы{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1 class="page-title">Образы</h1>
+    <p class="page-subtitle">Сборка, удаление и развёртывание инстансов с готовых образов стенда</p>
+  </div>
+  {% if user.role in ('admin', 'operator') %}
+  <div class="page-actions">
+    <form method="post" action="/images/prune-unused" style="display:inline;"
+          data-confirm
+          data-confirm-title="Удалить неиспользуемые образы?"
+          data-confirm-message="Будут удалены все образы стенда, которые не привязаны к инстансам и контейнерам."
+          data-confirm-ok="Удалить"
+          data-confirm-tone="danger"
+          data-confirm-icon="mdi-delete-sweep">
+      <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+      <button class="button danger" type="submit"><span class="mdi mdi-delete-sweep"></span> Удалить неиспользуемые</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% if message %}<p style="color:var(--success);">{{ message }}</p>{% endif %}
+{% if error %}<p style="color:var(--danger);">{{ error }}</p>{% endif %}
+
+{% if user.role in ('admin', 'operator') %}
+<div class="card images-build-card">
+  <h2 class="card-section-title"><span class="mdi mdi-docker"></span> Собрать образ</h2>
+  <p class="field-hint" style="margin-bottom:12px;">Инстанс не создаётся. После сборки образ появится в списке ниже.</p>
+  <form method="post" action="/images/build" class="images-build-form" id="image-build-form">
+    <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+    {% with form=build_ctx.form, branches=build_ctx.branches, tags=build_ctx.tags, git_branch_filter_active=build_ctx.git_branch_filter_active, git_tag_filter_active=build_ctx.git_tag_filter_active, show_git_pull=build_ctx.show_git_pull %}
+    {% include "partials/image_build_fields.html" %}
+    {% endwith %}
+    <div class="form-actions" style="margin-top:12px;">
+      <button class="button primary" type="submit"><span class="mdi mdi-hammer-wrench"></span> Собрать</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="table-wrapper images-table-wrap">
+    <table class="images-table">
+      <thead><tr>
+        <th>Теги</th>
+        <th>ID</th>
+        <th>Размер</th>
+        <th>Создан</th>
+        <th>Использование</th>
+        <th>Кем занят</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="images-rows"
+             hx-get="/partials/images-rows"
+             hx-trigger="load, every 5s [document.visibilityState=='visible']"
+             hx-swap="innerHTML"
+             hx-vals="js:{revs: imagesRowRevs()}">
+      {% include "partials/images_rows.html" %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -199,6 +199,165 @@ def list_ready_build_images(db: Database, limit: int = 30) -> list[dict[str, Any
     return [dict(r) for r in rows]
 
 
+def list_builds_for_inventory(db: Database) -> list[dict[str, Any]]:
+    with db.connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, build_key, git_commit, status, image_tag, image_id,
+                   source_mode, source_path, git_branch, git_tag, created_at
+            FROM builds
+            WHERE status IN ('ready', 'building', 'failed', 'pending')
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def find_build_by_image_tag(db: Database, image_tag: str) -> dict[str, Any] | None:
+    tag = (image_tag or "").strip()
+    if not tag:
+        return None
+    with db.connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, build_key, git_commit, status, image_tag, image_id,
+                   source_mode, source_path, git_branch, git_tag, created_at
+            FROM builds
+            WHERE image_tag=? AND status='ready'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (tag,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def unlink_image_tags_from_instances(
+    db: Database,
+    tags: list[str],
+    *,
+    user_id: str | None = None,
+) -> list[dict[str, Any]]:
+    tag_set = {(t or "").strip() for t in tags if (t or "").strip()}
+    if not tag_set:
+        return []
+    now = utc_now()
+    affected: list[dict[str, Any]] = []
+    with db.connection() as conn:
+        rows = conn.execute("SELECT id, name, slug, image_tag, rollback_image_tag FROM instances").fetchall()
+        for row in rows:
+            inst = dict(row)
+            cur = (inst.get("image_tag") or "").strip()
+            roll = (inst.get("rollback_image_tag") or "").strip()
+            new_cur = "" if cur in tag_set else cur
+            new_roll = "" if roll in tag_set else roll
+            if new_cur == cur and new_roll == roll:
+                continue
+            conn.execute(
+                """
+                UPDATE instances SET
+                  image_tag=?, rollback_image_tag=?,
+                  updated_by=?, updated_at=?, config_version=config_version + 1
+                WHERE id=?
+                """,
+                (new_cur, new_roll, user_id, now, inst["id"]),
+            )
+            affected.append(
+                {
+                    "id": inst["id"],
+                    "name": inst["name"],
+                    "slug": inst["slug"],
+                    "cleared_current": cur in tag_set,
+                    "cleared_rollback": roll in tag_set,
+                }
+            )
+    return affected
+
+
+def mark_builds_removed_for_image(
+    db: Database,
+    *,
+    image_id: str,
+    tags: list[str],
+) -> None:
+    now = utc_now()
+    with db.connection() as conn:
+        if image_id:
+            conn.execute(
+                """
+                UPDATE builds SET status='removed', finished_at=COALESCE(finished_at, ?)
+                WHERE image_id=? AND status != 'removed'
+                """,
+                (now, image_id),
+            )
+        for tag in tags:
+            t = (tag or "").strip()
+            if not t:
+                continue
+            conn.execute(
+                """
+                UPDATE builds SET status='removed', finished_at=COALESCE(finished_at, ?)
+                WHERE image_tag=? AND status != 'removed'
+                """,
+                (now, t),
+            )
+
+
+def queue_image_build(
+    db: Database,
+    user_id: str,
+    *,
+    source_mode: str,
+    source_path: str,
+    git_branch: str,
+    git_commit: str,
+    git_tag: str,
+) -> str:
+    jid = new_id()
+    build_id = new_id()
+    now = utc_now()
+    with db.connection() as conn:
+        active = conn.execute(
+            """
+            SELECT 1 FROM deployment_jobs
+            WHERE instance_id IS NULL AND job_type='image_build'
+              AND status IN ('queued', 'running')
+            LIMIT 1
+            """
+        ).fetchone()
+        if active:
+            raise ValueError("image build already active")
+        conn.execute(
+            """
+            INSERT INTO builds(
+              id, build_key, git_commit, status, image_tag, created_at,
+              source_mode, source_path, git_branch, git_tag
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                build_id,
+                "",
+                (git_commit or "").strip(),
+                "pending",
+                "",
+                now,
+                source_mode,
+                (source_path or "").strip(),
+                (git_branch or "main").strip() or "main",
+                (git_tag or "").strip(),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO deployment_jobs(
+              id, instance_id, job_type, status, build_id, requested_by, created_at
+            ) VALUES (?,?,?,?,?,?,?)
+            """,
+            (jid, None, "image_build", "queued", build_id, user_id, now),
+        )
+    return jid
+
+
 def list_db_profiles(db: Database) -> list[dict[str, Any]]:
     with db.connection() as conn:
         rows = conn.execute("SELECT * FROM db_profiles ORDER BY name").fetchall()
@@ -364,7 +523,7 @@ def list_jobs(db: Database, limit: int = 50) -> list[dict[str, Any]]:
             """
             SELECT j.*, i.slug, i.name AS instance_name
             FROM deployment_jobs j
-            JOIN instances i ON i.id = j.instance_id
+            LEFT JOIN instances i ON i.id = j.instance_id
             ORDER BY j.created_at DESC
             LIMIT ?
             """,

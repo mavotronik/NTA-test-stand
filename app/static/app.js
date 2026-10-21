@@ -682,9 +682,46 @@
     if (tagSelect) tagSelect.addEventListener('change', syncTagCommit);
     sync();
   }
+  function initImageBuildSourceMode(root) {
+    const scope = root && root.querySelector ? root : document;
+    const form = scope.querySelector('#image-build-form');
+    if (!form || form.dataset.sourceModeBound) return;
+    form.dataset.sourceModeBound = '1';
+    const repoPanel = form.querySelector('#image-source-repo');
+    const pathPanel = form.querySelector('#image-source-path');
+    const branchCommitPanel = form.querySelector('#image-source-branch-commit');
+    const branchSelect = form.querySelector('#image-git-branch');
+    const tagSelect = form.querySelector('#image-git-tag');
+    const pathInput = form.querySelector('#image-source-path-input');
+    function syncTagCommit() {
+      const tagChosen = !!(tagSelect && tagSelect.value);
+      if (branchCommitPanel) branchCommitPanel.hidden = tagChosen;
+      if (branchSelect && tagChosen) {
+        const mainOpt = [...branchSelect.options].find((o) => o.value === 'main');
+        if (mainOpt) branchSelect.value = 'main';
+      }
+    }
+    function sync() {
+      const mode = form.querySelector('input[name="source_mode"]:checked')?.value || 'repo';
+      if (repoPanel) repoPanel.hidden = mode === 'path';
+      if (pathPanel) pathPanel.hidden = mode !== 'path';
+      if (pathInput) {
+        if (mode === 'path') pathInput.setAttribute('required', '');
+        else pathInput.removeAttribute('required');
+      }
+      syncTagCommit();
+    }
+    form.querySelectorAll('input[name="source_mode"]').forEach((el) => {
+      el.addEventListener('change', sync);
+    });
+    if (tagSelect) tagSelect.addEventListener('change', syncTagCommit);
+    sync();
+  }
+
   initInstancePortInput(document.getElementById('instance-port'));
   initInstanceSearchableSelects(document);
   initInstanceSourceMode(document);
+  initImageBuildSourceMode(document);
 
   const confirmOverlay = document.getElementById('confirmModal');
   const confirmDialog = confirmOverlay?.querySelector('.modal');
@@ -866,6 +903,15 @@
     const revs = {};
     rows.forEach((tr) => {
       revs[tr.dataset.instanceId] = tr.dataset.instanceRev || '';
+    });
+    return JSON.stringify(revs);
+  };
+
+  window.imagesRowRevs = function imagesRowRevs() {
+    const rows = document.querySelectorAll('#images-rows tr[data-image-id]');
+    const revs = {};
+    rows.forEach((tr) => {
+      revs[tr.dataset.imageId] = tr.dataset.imageRev || '';
     });
     return JSON.stringify(revs);
   };
