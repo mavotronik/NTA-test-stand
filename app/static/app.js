@@ -1042,10 +1042,105 @@
     }
   });
 
+  const IMAGES_BULK_COPY = {
+    unlink: {
+      title: 'Отвязать образы?',
+      message: (n) => `Снять привязку с инстансов для выбранных образов (${n})? Контейнеры и файлы на хосте не удаляются. Занятые сейчас образы будут пропущены.`,
+      ok: 'Отвязать',
+      tone: 'warning',
+      icon: 'mdi-link-variant-off',
+    },
+    delete: {
+      title: 'Удалить образы?',
+      message: (n) => `Удалить с хоста выбранные образы (${n})? Используемые образы будут пропущены.`,
+      ok: 'Удалить',
+      tone: 'danger',
+      icon: 'mdi-delete',
+    },
+  };
+
+  const imagesBulkForm = document.getElementById('images-bulk-form');
+  const imagesRowsBody = document.getElementById('images-rows');
+  const imagesBulkSelectedIds = new Set();
+  let restoreImagesBulkChecks = () => {};
+  if (imagesBulkForm) {
+    const actionInput = document.getElementById('images-bulk-action');
+    const selectAll = document.getElementById('images-select-all');
+    const rowChecks = () => document.querySelectorAll('.images-row-check');
+    const bulkButtons = imagesBulkForm.querySelectorAll('[data-images-bulk]');
+
+    function syncImagesBulkUi() {
+      const checks = rowChecks();
+      const checked = [...checks].filter((c) => c.checked);
+      bulkButtons.forEach((btn) => {
+        btn.disabled = checked.length === 0;
+      });
+      if (selectAll) {
+        selectAll.indeterminate = checked.length > 0 && checked.length < checks.length;
+        selectAll.checked = checks.length > 0 && checked.length === checks.length;
+      }
+    }
+
+    restoreImagesBulkChecks = function restoreImagesBulkChecksImpl() {
+      rowChecks().forEach((cb) => {
+        cb.checked = imagesBulkSelectedIds.has(cb.value);
+      });
+      syncImagesBulkUi();
+    };
+
+    if (imagesRowsBody) {
+      imagesRowsBody.addEventListener('change', (evt) => {
+        const target = evt.target;
+        if (!(target instanceof HTMLInputElement) || !target.classList.contains('images-row-check')) return;
+        if (target.checked) imagesBulkSelectedIds.add(target.value);
+        else imagesBulkSelectedIds.delete(target.value);
+        syncImagesBulkUi();
+      });
+    }
+
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        rowChecks().forEach((cb) => {
+          cb.checked = selectAll.checked;
+          if (selectAll.checked) imagesBulkSelectedIds.add(cb.value);
+          else imagesBulkSelectedIds.delete(cb.value);
+        });
+        syncImagesBulkUi();
+      });
+    }
+
+    bulkButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.imagesBulk;
+        const copy = IMAGES_BULK_COPY[action];
+        if (!action || !actionInput || !copy) return;
+        const selected = [...rowChecks()].filter((c) => c.checked);
+        if (!selected.length) return;
+        const names = selected.map((c) => c.dataset.imageLabel || c.value);
+        openConfirm({
+          title: copy.title,
+          message: copy.message(selected.length),
+          items: names,
+          ok: copy.ok,
+          tone: copy.tone,
+          icon: copy.icon,
+          onConfirm: () => {
+            actionInput.value = action;
+            imagesBulkForm.requestSubmit();
+          },
+        });
+      });
+    });
+    restoreImagesBulkChecks();
+  }
+
   document.body.addEventListener('htmx:afterSwap', (evt) => {
     const target = evt.detail.target;
     if (target?.id === 'instances-rows') {
       restoreBulkChecks();
+    }
+    if (target?.id === 'images-rows') {
+      restoreImagesBulkChecks();
     }
     if (target?.id === 'formModalInner') {
       const url = evt.detail.pathInfo?.requestPath;

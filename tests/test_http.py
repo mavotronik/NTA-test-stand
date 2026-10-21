@@ -880,6 +880,75 @@ class HttpTests(unittest.TestCase):
         self.assertNotIn(f"/instances/{iid}/start", fresh.text)
         self.assertIn('data-instance-rev="' + instance_list_row_rev(dict(row), False) + '"', fresh.text)
 
+    @mock.patch("app.main.DockerService")
+    def test_images_bulk_actions(self, mock_docker_cls):
+        self.client.post("/login", data={"username": "admin", "password": "adminadmin"}, follow_redirects=True)
+        from app.db import Database
+        from app.repositories import create_instance, list_users, save_db_profile
+
+        image_id = "sha256:" + "a" * 64
+        tag = "grapes-nta-test:bulk000000001"
+        mock_docker_cls.return_value.list_docker_images_raw.return_value = [
+            {"id": image_id, "tags": [tag], "size": 0, "created": None},
+        ]
+        mock_docker_cls.return_value.list_containers_with_images.return_value = []
+
+        settings = get_settings()
+        db = Database(settings.db_path)
+        admin_id = next(user["id"] for user in list_users(db) if user["username"] == "admin")
+        profile_id = save_db_profile(
+            db,
+            profile_id=None,
+            name="img-bulk-profile",
+            host="127.0.0.1",
+            port=8123,
+            database_name="default",
+            username="u",
+            password_enc="enc",
+            tls=False,
+            writable=False,
+            comment="",
+        )
+        iid = create_instance(
+            db,
+            slug="img-bulk",
+            name="Img bulk",
+            port=3220,
+            db_profile_id=profile_id,
+            git_branch="main",
+            user_id=admin_id,
+            image_tag=tag,
+        )
+        with db.connection() as conn:
+            conn.execute("UPDATE instances SET state='stopped' WHERE id=?", (iid,))
+
+        listing = self.client.get("/images")
+        self.assertEqual(listing.status_code, 200)
+        self.assertIn('id="images-bulk-form"', listing.text)
+        self.assertIn('data-images-bulk="unlink"', listing.text)
+        self.assertIn('class="images-row-check"', listing.text)
+
+        csrf = self._admin_csrf()
+        empty = self.client.post(
+            "/images/bulk",
+            data={"csrf_token": csrf, "action": "unlink"},
+            follow_redirects=False,
+        )
+        self.assertEqual(empty.status_code, 302)
+        self.assertIn("error=", empty.headers.get("location", ""))
+
+        csrf = self._admin_csrf()
+        r = self.client.post(
+            "/images/bulk",
+            data={"csrf_token": csrf, "action": "unlink", "image_ids": [image_id]},
+            follow_redirects=False,
+        )
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("message=", r.headers.get("location", ""))
+        with db.connection() as conn:
+            row = conn.execute("SELECT image_tag FROM instances WHERE id=?", (iid,)).fetchone()
+        self.assertEqual(row["image_tag"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

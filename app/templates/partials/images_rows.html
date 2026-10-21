@@ -1,6 +1,9 @@
 {% for item in image_rows %}
 {% set row = item.row %}
 <tr data-image-id="{{ row.short_id }}" data-image-rev="{{ item.row_rev }}">
+  {% if user.role in ('admin', 'operator') %}
+  <td class="instances-col-check"><input type="checkbox" form="images-bulk-form" class="images-row-check" name="image_ids" value="{{ row.image_id }}" data-image-label="{{ row.tags[0] if row.tags else row.short_id }}" aria-label="Выбрать {{ row.short_id }}"></td>
+  {% endif %}
   <td>
     {% if row.tags %}
       {% for t in row.tags %}<code class="images-tag">{{ t }}</code>{% if not loop.last %} {% endif %}{% endfor %}
@@ -73,5 +76,5 @@
   </td>
 </tr>
 {% else %}
-<tr><td colspan="7">Образы стенда не найдены. Соберите образ или разверните инстанс.</td></tr>
+<tr><td colspan="8">Образы стенда не найдены. Соберите образ или разверните инстанс.</td></tr>
 {% endfor %}

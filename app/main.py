@@ -2031,6 +2031,18 @@ async def database_delete(
     return RedirectResponse("/databases?message=profile+deleted", status_code=302)
 
 
+def _images_bulk_redirect(*, message: str = "", error: str = "") -> RedirectResponse:
+    path = "/images"
+    params: list[str] = []
+    if message:
+        params.append(f"message={quote(message)}")
+    if error:
+        params.append(f"error={quote(error)}")
+    if params:
+        path = f"{path}?{'&'.join(params)}"
+    return RedirectResponse(path, status_code=302)
+
+
 def _images_template_rows(db: Database, rows: list[StandImageRow]) -> list[dict[str, Any]]:
     build_by_id = {
         b["id"]: b for b in list_builds_for_inventory(db) if b.get("id")
@@ -2168,6 +2180,110 @@ async def images_build_post(
         ip=_client_ip(request),
     )
     return RedirectResponse(f"/deployments/{jid}", status_code=302)
+
+
+@app.post("/images/bulk")
+async def images_bulk_action(
+    request: Request,
+    action: str = Form(...),
+    image_ids: list[str] = Form(default=[]),
+    csrf_token: str = Form(""),
+    db: Database = Depends(get_db),
+    user=Depends(current_user),
+):
+    require_role(user, "operator")
+    verify_csrf(request, user, csrf_token)
+    if action not in ("unlink", "delete"):
+        raise HTTPException(400, "unknown bulk action")
+    docker = DockerService()
+    rows = _stand_image_rows(db, docker)
+    by_id = {r.image_id: r for r in rows}
+    seen: set[str] = set()
+    done = 0
+    skipped = 0
+    errors: list[str] = []
+    tags_to_unlink: set[str] = set()
+
+    for iid in image_ids:
+        iid = (iid or "").strip()
+        if not iid or iid in seen:
+            continue
+        seen.add(iid)
+        row = by_id.get(iid)
+        if not row:
+            skipped += 1
+            continue
+        if action == "unlink":
+            has_instance_links = any(u.kind == "instance" for u in row.usages)
+            if not has_instance_links or row.in_use_now:
+                skipped += 1
+                continue
+            tags_to_unlink.update((t or "").strip() for t in row.tags if (t or "").strip())
+            done += 1
+        elif action == "delete":
+            if not row.deletable:
+                skipped += 1
+                continue
+            try:
+                docker.remove_image(row.image_id)
+                mark_builds_removed_for_image(db, image_id=row.image_id, tags=row.tags)
+                done += 1
+            except Exception as err:
+                skipped += 1
+                errors.append(str(err))
+
+    if not seen:
+        return _images_bulk_redirect(error="Не выбрано ни одного образа")
+
+    if action == "unlink" and tags_to_unlink:
+        affected = unlink_image_tags_from_instances(
+            db,
+            sorted(tags_to_unlink),
+            user_id=user["id"],
+        )
+        write_audit(
+            db,
+            user_id=user["id"],
+            username=user["username"],
+            role=user["role"],
+            action="images_bulk_unlink",
+            target_type="docker_image",
+            detail={"tags": sorted(tags_to_unlink), "instances": affected, "selected": done},
+            ip=_client_ip(request),
+        )
+    elif action == "delete" and done:
+        write_audit(
+            db,
+            user_id=user["id"],
+            username=user["username"],
+            role=user["role"],
+            action="images_bulk_delete",
+            target_type="docker_image",
+            detail={"removed": done, "errors": errors[:5]},
+            ip=_client_ip(request),
+        )
+
+    parts: list[str] = []
+    if action == "unlink":
+        if done:
+            parts.append(f"Отвязано образов: {done}")
+        if skipped:
+            parts.append(f"пропущено: {skipped}")
+        if done:
+            return _images_bulk_redirect(message=", ".join(parts))
+        return _images_bulk_redirect(error=", ".join(parts) if parts else "Ни один образ не отвязан")
+    if done:
+        parts.append(f"Удалено: {done}")
+    if skipped:
+        parts.append(f"пропущено: {skipped}")
+    if errors and not done:
+        return _images_bulk_redirect(error=errors[0])
+    if done:
+        msg = ", ".join(parts)
+        if errors:
+            msg += f"; часть не удалена"
+        return _images_bulk_redirect(message=msg)
+    return _images_bulk_redirect(error=", ".join(parts) if parts else "Ни один образ не удалён")
 
 
 @app.post("/images/unlink")

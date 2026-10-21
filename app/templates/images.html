@@ -40,9 +40,19 @@
 {% endif %}
 
 <div class="card">
+  {% if user.role in ('admin', 'operator') %}
+  <form id="images-bulk-form" method="post" action="/images/bulk" class="instances-bulk-bar">
+    <input type="hidden" name="csrf_token" value="{{ user.csrf_token }}">
+    <input type="hidden" name="action" id="images-bulk-action" value="">
+    <span class="instances-bulk-label">С выбранными:</span>
+    <button class="button warning" type="button" data-images-bulk="unlink" disabled><span class="mdi mdi-link-variant-off"></span> Отвязать</button>
+    <button class="button danger" type="button" data-images-bulk="delete" disabled><span class="mdi mdi-delete"></span> Удалить</button>
+  </form>
+  {% endif %}
   <div class="table-wrapper images-table-wrap">
     <table class="images-table">
       <thead><tr>
+        {% if user.role in ('admin', 'operator') %}<th class="instances-col-check"><input type="checkbox" id="images-select-all" title="Выбрать все" aria-label="Выбрать все"></th>{% endif %}
         <th>Теги</th>
         <th>ID</th>
         <th>Размер</th>
