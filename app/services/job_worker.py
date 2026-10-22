@@ -496,32 +496,35 @@ class JobWorker:
         bkey = bc.build_key
         ui_compose_dir = bc.compose_dir
         logs.append(f"context {ctx}")
-        with self.db.connection() as conn:
-            existing = conn.execute(
-                "SELECT * FROM builds WHERE build_key=? AND status='ready' ORDER BY created_at DESC LIMIT 1",
-                (bkey,),
-            ).fetchone()
-        if existing:
-            logs.append(f"reuse image {existing['image_tag']}")
-            logs.flush()
-            if preset_build_id and preset_build_id != existing["id"]:
-                with self.db.connection() as conn:
-                    conn.execute(
-                        """
-                        UPDATE builds SET status='removed', error=?, finished_at=COALESCE(finished_at, ?)
-                        WHERE id=?
-                        """,
-                        (
-                            f"reused existing image {existing['image_tag']}",
-                            utc_now(),
-                            preset_build_id,
-                        ),
-                    )
-            if defer_deploy:
-                self._set_job(job_id, "running", "deploy", build_id=existing["id"])
-            else:
-                self._set_job(job_id, "done", "ready", build_id=existing["id"])
-            return
+        if is_path_source(src):
+            logs.append("path source: always rebuild (skip image reuse)")
+        else:
+            with self.db.connection() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM builds WHERE build_key=? AND status='ready' ORDER BY created_at DESC LIMIT 1",
+                    (bkey,),
+                ).fetchone()
+            if existing:
+                logs.append(f"reuse image {existing['image_tag']}")
+                logs.flush()
+                if preset_build_id and preset_build_id != existing["id"]:
+                    with self.db.connection() as conn:
+                        conn.execute(
+                            """
+                            UPDATE builds SET status='removed', error=?, finished_at=COALESCE(finished_at, ?)
+                            WHERE id=?
+                            """,
+                            (
+                                f"reused existing image {existing['image_tag']}",
+                                utc_now(),
+                                preset_build_id,
+                            ),
+                        )
+                if defer_deploy:
+                    self._set_job(job_id, "running", "deploy", build_id=existing["id"])
+                else:
+                    self._set_job(job_id, "done", "ready", build_id=existing["id"])
+                return
         build_id = preset_build_id or new_id()
         active_build_id = build_id
         tag = bc.image_tag
@@ -575,13 +578,22 @@ class JobWorker:
                     log_callback=log_cb,
                 )
             logs.flush()
+            finished = utc_now()
             with self.db.connection() as conn:
                 conn.execute(
                     """
                     UPDATE builds SET status='ready', image_id=?, finished_at=? WHERE id=?
                     """,
-                    (image_id, utc_now(), build_id),
+                    (image_id, finished, build_id),
                 )
+                if is_path_source(src):
+                    conn.execute(
+                        """
+                        UPDATE builds SET status='removed', finished_at=COALESCE(finished_at, ?)
+                        WHERE build_key=? AND status='ready' AND id != ?
+                        """,
+                        (finished, bkey, build_id),
+                    )
             if defer_deploy:
                 self._set_job(job_id, "running", "deploy", build_id=build_id)
             else:

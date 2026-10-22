@@ -172,6 +172,73 @@ class PathBuildWorkerTests(unittest.TestCase):
             self.assertIsNotNone(inst)
             get_settings.cache_clear()
 
+    def test_path_source_rebuilds_on_repeat_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "config.yaml"
+            _write_test_config(cfg, data_dir=tmp)
+            os.environ["CONFIG_FILE"] = str(cfg)
+            get_settings.cache_clear()
+            settings = get_settings()
+            db = Database(settings.db_path)
+            grapes = Path(tmp) / "GrapesNTA"
+            _ui_tree(grapes)
+            uid = new_id()
+            profile_id = save_db_profile(
+                db,
+                profile_id=None,
+                name="p2",
+                host="127.0.0.1",
+                port=8123,
+                database_name="default",
+                username="u",
+                password_enc="enc",
+                tls=False,
+                writable=False,
+                comment="",
+            )
+            iid = create_instance(
+                db,
+                slug="path-rebuild",
+                name="Path rebuild",
+                port=3201,
+                db_profile_id=profile_id,
+                git_branch="",
+                user_id=uid,
+                source_mode="path",
+                source_path=str(grapes),
+            )
+            worker = JobWorker(settings, db)
+            patches = (
+                mock.patch.object(worker.docker, "can_compose_ui_build", return_value=False),
+                mock.patch.object(
+                    worker.docker,
+                    "build_image",
+                    return_value=("grapes-nta-test:path-deadbeef", "imgid"),
+                ),
+                mock.patch(
+                    "app.services.job_worker.git_service.resolve_instance_commit",
+                    side_effect=AssertionError("git resolve must not run for path source"),
+                ),
+                mock.patch(
+                    "app.services.job_worker.git_service.ensure_worktree",
+                    side_effect=AssertionError("worktree must not run for path source"),
+                ),
+            )
+            with patches[0], patches[1] as build_image, patches[2], patches[3]:
+                jid1 = queue_job(db, iid, "build", uid)
+                worker._run_build({"id": jid1, "instance_id": iid, "build_id": None})
+                jid2 = queue_job(db, iid, "build", uid)
+                worker._run_build({"id": jid2, "instance_id": iid, "build_id": None})
+            self.assertEqual(build_image.call_count, 2)
+            with db.connection() as conn:
+                rows = conn.execute(
+                    "SELECT status FROM builds WHERE build_key != '' ORDER BY created_at"
+                ).fetchall()
+            statuses = [r["status"] for r in rows]
+            self.assertEqual(statuses.count("ready"), 1)
+            self.assertEqual(statuses.count("removed"), 1)
+            get_settings.cache_clear()
+
 
 if __name__ == "__main__":
     unittest.main()
