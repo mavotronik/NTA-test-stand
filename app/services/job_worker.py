@@ -12,7 +12,16 @@ from app.db import Database, new_id, utc_now
 from app.repositories import delete_instance, fail_orphan_running_jobs, mark_build_failed
 from app.services import git_service
 from app.services.docker_service import DockerService
-from app.services.component_versions import build_instance_version_extra_env
+from app.services.component_versions import (
+    build_instance_version_extra_env,
+    record_schema_component_version,
+    schema_version_for_tree,
+)
+from app.services.schema_ensure import (
+    repo_root_from_compose_dir,
+    run_schema_ensure,
+    schema_ensure_available,
+)
 from app.services.instance_runtime import instance_container_env, launch_instance_container
 from app.services.job_queue import LIFECYCLE_JOB_TYPES, pick_next_queued_job
 from app.services.ui_source import (
@@ -644,6 +653,29 @@ class JobWorker:
                     WHERE id=?
                     """,
                     (inst.get("image_tag") or "", utc_now(), instance_id),
+                )
+            repo_root = repo_root_from_compose_dir(bc.compose_dir)
+            self._set_job(job_id, "running", "schema")
+            if schema_ensure_available(repo_root):
+                run_schema_ensure(
+                    repo_root,
+                    self.settings,
+                    prof,
+                    log=logs.append,
+                )
+                try:
+                    schema_ver, schema_ver_date = schema_version_for_tree(self.settings, repo_root)
+                    record_schema_component_version(
+                        data_dir,
+                        schema_version=schema_ver,
+                        schema_version_date=schema_ver_date,
+                    )
+                    logs.append(f"schema version recorded: {schema_ver}")
+                except Exception as ver_err:
+                    logs.append(f"WARNING: schema version not recorded: {ver_err}")
+            else:
+                logs.append(
+                    "WARNING: deploy/schema/ensure-live.sh or ensure.list missing; skip schema ensure"
                 )
             logs.append(f"starting {name} on port {inst['port']}")
             self._set_job(job_id, "running", "healthcheck")

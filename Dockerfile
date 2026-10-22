@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
     CONFIG_FILE=/config/config.yaml
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates \
+  && apt-get install -y --no-install-recommends git ca-certificates curl gettext-base \
   && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

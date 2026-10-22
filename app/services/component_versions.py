@@ -68,6 +68,49 @@ def _deployed_at_z() -> str:
     return utc_now().replace("+00:00", "Z")
 
 
+def _write_component_versions_file(data_dir: Path, merged: dict[str, ComponentVersionRow]) -> None:
+    mount_dir = prepare_ui_data_mount(data_dir)
+    path = mount_dir / COMPONENT_VERSIONS_FILENAME
+    tmp = path.with_name(f"{COMPONENT_VERSIONS_FILENAME}.tmp")
+    tmp.write_text(format_component_versions_tsv(merged), encoding="utf-8")
+    try:
+        tmp.chmod(0o644)
+        os.chown(tmp, UI_APP_UID, UI_APP_GID)
+    except OSError:
+        pass
+    tmp.replace(path)
+    try:
+        os.chown(path, UI_APP_UID, UI_APP_GID)
+    except OSError:
+        pass
+
+
+def schema_version_for_tree(settings: Settings, repo_root: Path) -> tuple[str, str]:
+    repo = Path(settings.policy.git_remote_url)
+    version = git_service.component_version(repo, "schema", tree=repo_root.resolve())
+    version_date = git_service.version_date_for_component_version(repo, version)
+    return version, version_date
+
+
+def record_schema_component_version(
+    data_dir: Path,
+    *,
+    schema_version: str,
+    schema_version_date: str,
+) -> None:
+    """Строка schema в component-versions.tsv (как note_component_version schema в deploy.sh)."""
+    mount_dir = prepare_ui_data_mount(data_dir)
+    path = mount_dir / COMPONENT_VERSIONS_FILENAME
+    existing = parse_component_versions_tsv(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    merged = dict(existing)
+    merged["schema"] = ComponentVersionRow(
+        version=schema_version,
+        version_date=schema_version_date,
+        deployed_at=_deployed_at_z(),
+    )
+    _write_component_versions_file(data_dir, merged)
+
+
 def write_instance_component_versions(
     data_dir: Path,
     docker: DockerService,
@@ -88,18 +131,7 @@ def write_instance_component_versions(
         version_date=ui_version_date,
         deployed_at=deployed_at or _deployed_at_z(),
     )
-    tmp = path.with_name(f"{COMPONENT_VERSIONS_FILENAME}.tmp")
-    tmp.write_text(format_component_versions_tsv(merged), encoding="utf-8")
-    try:
-        tmp.chmod(0o644)
-        os.chown(tmp, UI_APP_UID, UI_APP_GID)
-    except OSError:
-        pass
-    tmp.replace(path)
-    try:
-        os.chown(path, UI_APP_UID, UI_APP_GID)
-    except OSError:
-        pass
+    _write_component_versions_file(data_dir, merged)
 
 
 def resolve_instance_ui_version_meta(settings: Settings, inst: dict) -> UiVersionMeta:
