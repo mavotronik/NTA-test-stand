@@ -92,6 +92,59 @@ class ImageInventoryTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertTrue(rows[0].deletable)
 
+    def test_build_without_docker_image_excluded(self):
+        iid = "sha256:" + "c" * 64
+        rows = merge_stand_image_rows(
+            docker_images=[],
+            instances=[],
+            containers=[],
+            builds=[
+                {
+                    "id": "b-ghost",
+                    "status": "ready",
+                    "image_tag": "grapes-nta-test:ghost00000001",
+                    "image_id": iid,
+                    "git_commit": "ghost00000001",
+                }
+            ],
+        )
+        self.assertEqual(rows, [])
+
+    def test_docker_stand_tag_without_build(self):
+        iid = "sha256:" + "d" * 64
+        rows = merge_stand_image_rows(
+            docker_images=[
+                {"id": iid, "tags": ["grapes-nta-test:manual0000001"], "size": 2048, "created": None}
+            ],
+            instances=[],
+            containers=[],
+            builds=[],
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].tags, ["grapes-nta-test:manual0000001"])
+        self.assertIsNone(rows[0].build_id)
+
+    def test_untagged_docker_image_matched_by_build_image_id(self):
+        iid = "sha256:" + "e" * 64
+        rows = merge_stand_image_rows(
+            docker_images=[{"id": iid, "tags": [], "size": 512, "created": 1_700_000_001}],
+            instances=[],
+            containers=[],
+            builds=[
+                {
+                    "id": "b-untagged",
+                    "status": "ready",
+                    "image_tag": "grapes-nta-test:was-tagged01",
+                    "image_id": iid,
+                    "git_commit": "was-tagged01aa",
+                }
+            ],
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].tags, [])
+        self.assertEqual(rows[0].build_id, "b-untagged")
+        self.assertEqual(rows[0].git_commit, "was-tagged01")
+
 
 if __name__ == "__main__":
     unittest.main()

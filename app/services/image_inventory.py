@@ -165,47 +165,33 @@ def merge_stand_image_rows(
     builds: list[dict[str, Any]],
 ) -> list[StandImageRow]:
     by_id: dict[str, dict[str, Any]] = {}
-    build_by_id: dict[str, dict[str, Any]] = {}
     build_by_tag: dict[str, dict[str, Any]] = {}
+    build_by_image_id: dict[str, dict[str, Any]] = {}
     for b in builds:
         if (b.get("status") or "") == "removed":
             continue
-        bid = b.get("id")
-        if bid:
-            build_by_id[bid] = b
         tag = (b.get("image_tag") or "").strip()
         if tag:
             build_by_tag[tag] = b
         iid = normalize_image_id(b.get("image_id") or "")
-        if iid:
-            by_id.setdefault(iid, {"tags": set(), "size": 0, "created": None})
-            by_id[iid].setdefault("build", b)
+        if iid and iid not in build_by_image_id:
+            build_by_image_id[iid] = b
 
     for img in docker_images:
         iid = normalize_image_id(img.get("id") or "")
         if not iid:
             continue
         tags = [t for t in (img.get("tags") or []) if is_stand_image_tag(t)]
-        if not tags and iid not in by_id:
+        if not tags and iid not in build_by_image_id:
             continue
         row = by_id.setdefault(iid, {"tags": set(), "size": 0, "created": None})
         row["tags"].update(tags)
+        if iid in build_by_image_id:
+            row.setdefault("build", build_by_image_id[iid])
         if img.get("size"):
             row["size"] = int(img["size"])
         if img.get("created") is not None:
             row["created"] = img.get("created")
-
-    for b in builds:
-        if (b.get("status") or "") == "removed":
-            continue
-        iid = normalize_image_id(b.get("image_id") or "")
-        tag = (b.get("image_tag") or "").strip()
-        if not iid:
-            continue
-        if iid in by_id:
-            continue
-        if tag and is_stand_image_tag(tag):
-            by_id[iid] = {"tags": {tag}, "size": 0, "created": b.get("created_at"), "build": b}
 
     rows: list[StandImageRow] = []
     for iid, meta in by_id.items():
