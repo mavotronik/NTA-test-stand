@@ -56,6 +56,8 @@ from app.deps import (
     init_host_metrics_recorder,
     init_self_update_service,
     optional_user,
+    shutdown_host_metrics_recorder,
+    start_metrics_recording,
     stop_host_metrics_recorder,
     stop_self_update_service,
 )
@@ -144,9 +146,10 @@ async def lifespan(app: FastAPI):
             )
     if is_degraded():
         get_metrics(settings)
+        start_metrics_recording(settings, degraded=True)
     yield
     clear_degraded()
-    stop_host_metrics_recorder()
+    shutdown_host_metrics_recorder()
     stop_self_update_service()
     if worker:
         worker.stop()

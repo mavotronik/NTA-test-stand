@@ -34,16 +34,19 @@ class DegradedModeTests(unittest.TestCase):
         get_settings.cache_clear()
         deps._metrics = None
         deps._metrics_recorder = None
+        deps._metrics_store = None
         deps._worker = None
         clear_degraded()
 
     def tearDown(self):
+        deps.shutdown_host_metrics_recorder()
         clear_degraded()
         get_settings.cache_clear()
         os.environ.pop("CONFIG_FILE", None)
         self._tmp.cleanup()
         deps._metrics = None
         deps._metrics_recorder = None
+        deps._metrics_store = None
         deps._worker = None
 
     def _client_with_patches(self, **patches):
@@ -87,7 +90,9 @@ class DegradedModeTests(unittest.TestCase):
             self.assertEqual(r_health.json().get("disk_full"), "true")
             self.assertEqual(client.get("/", follow_redirects=False).status_code, 302)
             self.assertEqual(client.get("/instances", follow_redirects=False).headers.get("location"), "/degraded")
-            self.assertIsNone(deps._metrics_recorder)
+            self.assertIsNotNone(deps._metrics_recorder)
+            self.assertTrue(deps._metrics_recorder._thread.is_alive())
+            self.assertIsNone(deps._metrics_store)
             self.assertIsNone(deps._worker)
         for c in reversed(ctxs):
             c.__exit__(None, None, None)

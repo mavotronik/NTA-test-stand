@@ -64,6 +64,7 @@ def enter_degraded_mode(
     set_degraded(
         DegradedInfo(reason=reason, db_path=db_path, disk_full=disk_full, forced=forced)
     )
+    start_metrics_recording(get_settings(), degraded=True)
 
 
 def get_db(settings: Annotated[Settings, Depends(get_settings)]) -> Database:
@@ -153,19 +154,55 @@ def get_metrics_store(settings: Annotated[Settings, Depends(get_settings)]) -> H
     return _metrics_store
 
 
-def init_host_metrics_recorder(settings: Settings) -> HostMetricsRecorder:
-    global _metrics_recorder, _metrics, _metrics_store
-    if _metrics is None:
-        _metrics = HostMetricsCollector(settings.host_proc, _metrics_disk_paths(settings))
-    if _metrics_store is None:
-        _metrics_store = HostMetricsStore(settings.host_metrics_db_path)
+def ensure_metrics_recorder(settings: Settings) -> HostMetricsRecorder:
+    global _metrics_recorder
+    get_metrics(settings)
     if _metrics_recorder is None:
-        _metrics_recorder = HostMetricsRecorder(settings, _metrics_store, _metrics)
-        _metrics_recorder.start()
+        _metrics_recorder = HostMetricsRecorder(settings, _metrics, store=None)
     return _metrics_recorder
 
 
+def start_metrics_recording(settings: Settings, *, degraded: bool) -> HostMetricsRecorder:
+    recorder = ensure_metrics_recorder(settings)
+    recorder.stop()
+    recorder.start(degraded=degraded)
+    return recorder
+
+
+def flush_metrics_buffer(settings: Settings) -> int:
+    """Сбрасывает буфер в SQLite. -1 при ошибке диска."""
+    global _metrics_store, _metrics_recorder
+    if _metrics_recorder is None or _metrics_recorder.buffered_count() == 0:
+        return 0
+    try:
+        if _metrics_store is None:
+            _metrics_store = HostMetricsStore(settings.host_metrics_db_path)
+        return _metrics_recorder.flush_to_store(_metrics_store)
+    except (sqlite3.DatabaseError, OSError):
+        return -1
+
+
+def init_host_metrics_recorder(settings: Settings) -> HostMetricsRecorder:
+    global _metrics_recorder, _metrics, _metrics_store
+    get_metrics(settings)
+    if _metrics_store is None:
+        _metrics_store = HostMetricsStore(settings.host_metrics_db_path)
+    flushed = flush_metrics_buffer(settings)
+    if flushed < 0:
+        raise sqlite3.DatabaseError("host metrics flush failed")
+    recorder = ensure_metrics_recorder(settings)
+    recorder.stop()
+    recorder.set_store(_metrics_store)
+    recorder.start(degraded=False)
+    return recorder
+
+
 def stop_host_metrics_recorder() -> None:
+    if _metrics_recorder is not None:
+        _metrics_recorder.stop()
+
+
+def shutdown_host_metrics_recorder() -> None:
     global _metrics_recorder
     if _metrics_recorder is not None:
         _metrics_recorder.stop()

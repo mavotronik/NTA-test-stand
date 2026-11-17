@@ -49,6 +49,7 @@ class Policy:
     health_timeout_sec: int
     health_interval_sec: int
     host_metrics_refresh_sec: float
+    host_metrics_degraded_refresh_sec: float
     host_disk_paths: list[str]
     host_metrics_history_retention_hours: float
     host_metrics_history_max_points: int
@@ -97,6 +98,7 @@ def load_policy_from_mapping(data: Mapping[str, Any], *, config_dir: Path | None
         health_timeout_sec=int(deploy.get("health_timeout_sec", 120)),
         health_interval_sec=int(deploy.get("health_interval_sec", 3)),
         host_metrics_refresh_sec=float(hm.get("refresh_sec", 5)),
+        host_metrics_degraded_refresh_sec=float(hm.get("degraded_refresh_sec", 30)),
         host_disk_paths=list(hm.get("disk_paths") or ["/"]),
         host_metrics_history_retention_hours=float(hm.get("history_retention_hours", 72)),
         host_metrics_history_max_points=int(hm.get("history_max_points", 400)),

@@ -73,6 +73,7 @@ class GitWorktreeCleanupTests(unittest.TestCase):
                 health_timeout_sec=60,
                 health_interval_sec=3,
                 host_metrics_refresh_sec=5,
+                host_metrics_degraded_refresh_sec=30,
                 host_disk_paths=["/"],
                 host_metrics_history_retention_hours=72,
                 host_metrics_history_max_points=400,
