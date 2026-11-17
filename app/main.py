@@ -475,6 +475,7 @@ def degraded_page(request: Request, settings=Depends(get_settings), metrics=Depe
     ctx = {
         "user": None,
         "active": None,
+        "body_class": "degraded-mode",
         **_degraded_metrics_context(settings, metrics),
         "reason": info.reason if info else "",
         "db_path": str(info.db_path) if info else "",

@@ -2030,4 +2030,71 @@
             border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
         }
 
+        body.degraded-mode {
+            background: color-mix(in srgb, var(--danger) 6%, var(--bg));
+        }
+
+        body.degraded-mode .main {
+            padding: 0;
+            min-height: 100vh;
+        }
+
+        body.degraded-mode .content {
+            max-width: none;
+            margin: 0;
+            padding: 0;
+            width: 100%;
+        }
+
+        .degraded-screen {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            width: 100%;
+        }
+
+        .degraded-screen-header {
+            padding: 28px 32px 0;
+        }
+
+        .degraded-banner--full {
+            width: 100%;
+            box-sizing: border-box;
+            flex: 0 0 auto;
+            margin: 20px 0 0;
+            padding: 22px 32px;
+            border-radius: 0;
+            border-left: none;
+            border-right: none;
+            border-width: 1px 0;
+        }
+
+        .degraded-banner-body {
+            flex: 1;
+            min-width: 0;
+            max-width: 72rem;
+        }
+
+        .degraded-banner--full .degraded-banner-icon {
+            margin-top: 2px;
+        }
+
+        .degraded-screen-metrics {
+            flex: 1;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px 32px 32px;
+        }
+
+        .degraded-metrics-title {
+            margin: 0 0 14px;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .degraded-metrics.metrics {
+            width: 100%;
+        }
+
 .htmx-indicator{opacity:.4;}

@@ -9,7 +9,7 @@
   <script defer src="/static/vendor/htmx.min.js"></script>
   {% block head %}{% endblock %}
 </head>
-<body>
+<body{% if body_class %} class="{{ body_class }}"{% endif %}>
 {% if user %}
 <header class="header">
   <div class="header-left">
