@@ -1993,4 +1993,41 @@
             margin: 0;
         }
 
+        .degraded-banner {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+            padding: 16px 18px;
+            margin-bottom: 18px;
+            border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+            border-radius: var(--radius, 10px);
+            background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+        }
+
+        .degraded-banner-icon {
+            font-size: 28px;
+            color: var(--danger);
+            flex-shrink: 0;
+        }
+
+        .degraded-banner-title {
+            margin: 0 0 8px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .degraded-banner p {
+            margin: 0 0 8px;
+            color: var(--text-muted, var(--text));
+            line-height: 1.45;
+        }
+
+        .degraded-banner p:last-child {
+            margin-bottom: 0;
+        }
+
+        .metric-disk-empty {
+            border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+        }
+
 .htmx-indicator{opacity:.4;}

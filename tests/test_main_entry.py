@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,8 +34,21 @@ storage_root: /tmp/data
         fake = mock.Mock(port=8090, host="127.0.0.1")
         with mock.patch.object(entry, "load_settings", return_value=fake):
             with mock.patch.object(entry, "uvicorn") as uv:
-                entry.main()
+                entry.main([])
         uv.run.assert_called_once_with("app.main:app", host="127.0.0.1", port=8090)
+
+    def test_main_force_degraded_sets_env(self):
+        from app import __main__ as entry
+        from app.degraded import FORCE_DEGRADED_ENV
+
+        fake = mock.Mock(port=8090, host="127.0.0.1")
+        with mock.patch.object(entry, "load_settings", return_value=fake):
+            with mock.patch.object(entry, "uvicorn"):
+                with mock.patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop(FORCE_DEGRADED_ENV, None)
+                    entry.main(["--force-degraded"])
+                    self.assertEqual(os.environ.get(FORCE_DEGRADED_ENV), "1")
+                    os.environ.pop(FORCE_DEGRADED_ENV, None)
 
 
 if __name__ == "__main__":

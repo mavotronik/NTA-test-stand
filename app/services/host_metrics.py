@@ -105,6 +105,8 @@ def _disk_usage_paths(paths: list[str]) -> list[dict[str, Any]]:
             "percent": round(du.percent, 1),
             "used_gb": round(du.used / (1024**3), 2),
             "total_gb": round(du.total / (1024**3), 2),
+            "free_gb": round(du.free / (1024**3), 2),
+            "free_bytes": du.free,
         })
     return out
 

@@ -1,0 +1,31 @@
+{% from "partials/host_metrics_overlay_fragments.html" import cpu_overlay, memory_overlay, load_overlay %}
+<section class="metrics">
+  <div class="card metric">
+    <div class="metric-overlay">{{ cpu_overlay(metrics) }}</div>
+  </div>
+  <div class="card metric">
+    <div class="metric-overlay">{{ memory_overlay(metrics) }}</div>
+  </div>
+  <div class="card metric">
+    <div class="metric-overlay">{{ load_overlay(metrics) }}</div>
+  </div>
+  {% for disk in metrics.disks %}
+  <div class="card metric{% if disk.free_bytes is defined and disk.free_bytes == 0 %} metric-disk-empty{% endif %}">
+    <div class="metric-top">
+      <div class="metric-icon"><span class="mdi mdi-harddisk"></span></div>
+    </div>
+    <div class="metric-label">Disk ({{ disk.path }})</div>
+    <div class="metric-value">{{ disk.percent }}%</div>
+    <div class="metric-extra">{{ disk.used_gb }} / {{ disk.total_gb }} GB · свободно {{ disk.free_gb }} GB</div>
+    <div class="progress"><div class="progress-value {% if disk.percent > 85 %}danger{% elif disk.percent > 70 %}warning{% endif %}" style="width:{{ disk.percent }}%"></div></div>
+  </div>
+  {% else %}
+  <div class="card metric">
+    <div class="metric-top">
+      <div class="metric-icon"><span class="mdi mdi-harddisk"></span></div>
+    </div>
+    <div class="metric-label">Disk</div>
+    <div class="metric-value">—</div>
+  </div>
+  {% endfor %}
+</section>

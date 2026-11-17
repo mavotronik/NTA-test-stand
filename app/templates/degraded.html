@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Ограниченный режим{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Ограниченный режим</h1>
+    <div class="page-subtitle">Панель управления стендом недоступна</div>
+  </div>
+</div>
+<div class="degraded-banner" role="alert">
+  <span class="mdi mdi-alert-circle-outline degraded-banner-icon" aria-hidden="true"></span>
+  <div>
+    {% if forced %}
+    <p class="degraded-banner-title">Режим включён вручную</p>
+    <p>{{ reason }}. База и воркер не используются. Создавать инстансы и входить в панель сейчас нельзя — доступны только метрики хоста.</p>
+    <p>Для обычной работы перезапустите без <code>--force-degraded</code> и без <code>TSM_FORCE_DEGRADED</code>.</p>
+    {% elif disk_full %}
+    <p class="degraded-banner-title">На диске нет свободного места</p>
+    <p>База панели (<code>{{ db_path }}</code>) не может записываться. Создавать инстансы, входить в систему и управлять стендом сейчас нельзя.</p>
+    <p>Освободите место на хосте (логи, образы Docker, старые сборки), проверьте <code>dmesg</code> и журнал ядра, затем перезапустите сервис <code>{{ systemd_unit }}</code>.</p>
+    {% else %}
+    <p class="degraded-banner-title">База панели не открывается</p>
+    <p>Файл <code>{{ db_path }}</code> недоступен: {{ reason }}. Создавать инстансы и пользоваться стендом сейчас нельзя. Проверьте диск, файловую систему и <code>dmesg</code>, затем перезапустите <code>{{ systemd_unit }}</code>.</p>
+    {% endif %}
+  </div>
+</div>
+<div id="degraded-metrics-panel">
+  {% include "partials/degraded_metrics.html" %}
+</div>
+<div id="degraded-metrics-live"
+     hx-get="/partials/degraded/metrics"
+     hx-trigger="every {{ refresh_sec|default(5) }}s"
+     hx-target="#degraded-metrics-panel"
+     hx-swap="innerHTML"
+     hidden
+     aria-hidden="true"></div>
+{% endblock %}

@@ -4,6 +4,7 @@ import asyncio
 import html
 import json
 import time
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -30,12 +31,24 @@ from app.auth import (
 from app.config import branch_allowed, resolve_public_host, tag_allowed
 from app.crypto_util import encrypt_secret, get_fernet, hash_password
 from app.db import Database, new_id, utc_now
+from app.degraded import (
+    FORCE_DEGRADED_REASON,
+    clear_degraded,
+    degraded_info,
+    is_degraded,
+    is_filesystem_full,
+    is_force_degraded_enabled,
+    is_sqlite_disk_full,
+)
 from app.deps import (
     LOGIN_REQUIRED_DETAIL,
     _wants_json_response,
     current_user,
+    attempt_degraded_recovery,
+    enter_degraded_mode,
     get_db,
     get_metrics,
+    recovery_redirect_path,
     get_metrics_store,
     get_self_update_service,
     get_settings,
@@ -100,12 +113,39 @@ APP_DIR = Path(__file__).resolve().parent
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    db = Database(settings.db_path)
-    bootstrap_admin(db, settings.bootstrap_admin_user, settings.bootstrap_admin_password)
-    worker = None if settings.skip_worker else get_worker(settings, db)
-    init_self_update_service(settings, db)
-    init_host_metrics_recorder(settings)
+    clear_degraded()
+    db: Database | None = None
+    worker = None
+    if is_force_degraded_enabled():
+        enter_degraded_mode(
+            reason=FORCE_DEGRADED_REASON,
+            db_path=settings.db_path,
+            disk_full=False,
+            forced=True,
+        )
+    elif is_filesystem_full(settings.db_path):
+        enter_degraded_mode(
+            reason="На файловой системе базы данных нет свободного места",
+            db_path=settings.db_path,
+            disk_full=True,
+        )
+    else:
+        try:
+            db = Database(settings.db_path)
+            bootstrap_admin(db, settings.bootstrap_admin_user, settings.bootstrap_admin_password)
+            worker = None if settings.skip_worker else get_worker(settings, db)
+            init_self_update_service(settings, db)
+            init_host_metrics_recorder(settings)
+        except (sqlite3.DatabaseError, OSError) as exc:
+            enter_degraded_mode(
+                reason=str(exc),
+                db_path=settings.db_path,
+                disk_full=is_sqlite_disk_full(exc) or is_filesystem_full(settings.db_path),
+            )
+    if is_degraded():
+        get_metrics(settings)
     yield
+    clear_degraded()
     stop_host_metrics_recorder()
     stop_self_update_service()
     if worker:
@@ -114,6 +154,36 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Test Stand Manager", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
+
+
+def _degraded_health_payload() -> dict[str, str]:
+    info = degraded_info()
+    return {
+        "ok": "false",
+        "degraded": "true",
+        "forced": "true" if info and info.forced else "false",
+        "disk_full": "true" if info and info.disk_full else "false",
+        "error": info.reason if info else "unknown",
+    }
+
+
+@app.middleware("http")
+async def degraded_gate(request: Request, call_next):
+    if not is_degraded():
+        return await call_next(request)
+    path = request.url.path
+    if path.startswith("/static") or path in ("/degraded", "/partials/degraded/metrics"):
+        return await call_next(request)
+    if path == "/api/health":
+        return JSONResponse(_degraded_health_payload(), status_code=503)
+    if path.startswith("/api/"):
+        return JSONResponse(
+            {"detail": "panel degraded", **_degraded_health_payload()},
+            status_code=503,
+        )
+    return RedirectResponse(url="/degraded", status_code=302)
+
+
 def _template_context(request: Request) -> dict[str, Any]:
     return {
         "panel_build": panel_build_info(),
@@ -377,7 +447,53 @@ def _render(request: Request, name: str, ctx: dict[str, Any], status: int = 200)
 
 @app.get("/api/health")
 def api_health() -> dict[str, str]:
+    if is_degraded():
+        return _degraded_health_payload()
     return {"ok": "true"}
+
+
+def _degraded_metrics_context(settings, metrics) -> dict[str, Any]:
+    snap = metrics.snapshot()
+    try:
+        data_path = str(settings.data_dir.resolve())
+    except OSError:
+        data_path = str(settings.data_dir)
+    data_disk = next((d for d in snap.disks if d["path"] == data_path), None)
+    return {
+        "metrics": metrics.as_dict(),
+        "cpu_count": snap.cpu_count,
+        "refresh_sec": settings.policy.host_metrics_refresh_sec,
+        "data_disk": data_disk,
+    }
+
+
+@app.get("/degraded", response_class=HTMLResponse)
+def degraded_page(request: Request, settings=Depends(get_settings), metrics=Depends(get_metrics)):
+    if not is_degraded() or attempt_degraded_recovery(settings):
+        return RedirectResponse(recovery_redirect_path(request), status_code=302)
+    info = degraded_info()
+    ctx = {
+        "user": None,
+        "active": None,
+        **_degraded_metrics_context(settings, metrics),
+        "reason": info.reason if info else "",
+        "db_path": str(info.db_path) if info else "",
+        "disk_full": bool(info and info.disk_full),
+        "forced": bool(info and info.forced),
+        "systemd_unit": settings.self_update.systemd_unit,
+    }
+    return _render(request, "degraded.html", ctx)
+
+
+@app.get("/partials/degraded/metrics", response_class=HTMLResponse)
+def partial_degraded_metrics(request: Request, settings=Depends(get_settings), metrics=Depends(get_metrics)):
+    if not is_degraded() or attempt_degraded_recovery(settings):
+        dest = recovery_redirect_path(request)
+        return Response(status_code=204, headers={"HX-Redirect": dest})
+    return templates.TemplateResponse(
+        "partials/degraded_metrics.html",
+        {"request": request, **_degraded_metrics_context(settings, metrics)},
+    )
 
 
 def _self_update_ctx(user: dict[str, Any], snap) -> dict[str, Any]:

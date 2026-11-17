@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import sqlite3
+import threading
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
-from app.auth import get_session_user, session_from_request
+from app.auth import bootstrap_admin, get_session_user, session_from_request
 from app.config import Settings, load_settings
+from app.degraded import (
+    DegradedInfo,
+    clear_degraded,
+    is_degraded,
+    is_filesystem_full,
+    is_force_degraded_enabled,
+    is_sqlite_disk_full,
+    set_degraded,
+)
 from app.db import Database
 from app.host_metrics_db import HostMetricsStore
 from app.services.host_metrics import HostMetricsCollector
@@ -20,8 +32,53 @@ def get_settings() -> Settings:
     return load_settings()
 
 
+DEGRADED_DETAIL = "panel degraded"
+
+
+def _metrics_disk_paths(settings: Settings) -> list[str]:
+    paths = list(settings.policy.host_disk_paths)
+    try:
+        data = str(settings.data_dir.resolve())
+    except OSError:
+        data = str(settings.data_dir)
+    if data not in paths:
+        paths.insert(0, data)
+    return paths
+
+
+def enter_degraded_mode(
+    *,
+    reason: str,
+    db_path: Path,
+    disk_full: bool,
+    forced: bool = False,
+) -> None:
+    if is_degraded():
+        return
+    stop_host_metrics_recorder()
+    stop_self_update_service()
+    global _worker
+    if _worker is not None:
+        _worker.stop()
+        _worker = None
+    set_degraded(
+        DegradedInfo(reason=reason, db_path=db_path, disk_full=disk_full, forced=forced)
+    )
+
+
 def get_db(settings: Annotated[Settings, Depends(get_settings)]) -> Database:
-    return Database(settings.db_path)
+    if is_degraded():
+        raise HTTPException(status_code=503, detail=DEGRADED_DETAIL)
+    try:
+        return Database(settings.db_path)
+    except (sqlite3.DatabaseError, OSError) as exc:
+        disk_full = is_sqlite_disk_full(exc) or is_filesystem_full(settings.db_path)
+        enter_degraded_mode(
+            reason=str(exc),
+            db_path=settings.db_path,
+            disk_full=disk_full,
+        )
+        raise HTTPException(status_code=503, detail=DEGRADED_DETAIL) from exc
 
 
 _metrics: HostMetricsCollector | None = None
@@ -29,12 +86,63 @@ _metrics_store: HostMetricsStore | None = None
 _metrics_recorder: HostMetricsRecorder | None = None
 _worker: JobWorker | None = None
 _self_update: SelfUpdateService | None = None
+_recovery_lock = threading.Lock()
+
+
+def _teardown_partial_recovery() -> None:
+    stop_host_metrics_recorder()
+    stop_self_update_service()
+    global _worker
+    if _worker is not None:
+        _worker.stop()
+        _worker = None
+
+
+def attempt_degraded_recovery(settings: Settings) -> bool:
+    """Пробует выйти из ограниченного режима без перезапуска процесса."""
+    with _recovery_lock:
+        if not is_degraded():
+            return True
+        if is_force_degraded_enabled():
+            return False
+        if is_filesystem_full(settings.db_path):
+            return False
+        try:
+            db = Database(settings.db_path)
+            bootstrap_admin(
+                db,
+                settings.bootstrap_admin_user,
+                settings.bootstrap_admin_password,
+            )
+            if not settings.skip_worker:
+                get_worker(settings, db)
+            init_self_update_service(settings, db)
+            init_host_metrics_recorder(settings)
+        except (sqlite3.DatabaseError, OSError):
+            _teardown_partial_recovery()
+            return False
+        clear_degraded()
+        return True
+
+
+def recovery_redirect_path(request: Request) -> str:
+    sid = session_from_request(request)
+    if not sid:
+        return "/login"
+    settings = get_settings()
+    try:
+        db = Database(settings.db_path)
+        if get_session_user(db, sid):
+            return "/"
+    except (sqlite3.DatabaseError, OSError):
+        pass
+    return "/login"
 
 
 def get_metrics(settings: Annotated[Settings, Depends(get_settings)]) -> HostMetricsCollector:
     global _metrics
     if _metrics is None:
-        _metrics = HostMetricsCollector(settings.host_proc, settings.policy.host_disk_paths)
+        _metrics = HostMetricsCollector(settings.host_proc, _metrics_disk_paths(settings))
     return _metrics
 
 
@@ -48,7 +156,7 @@ def get_metrics_store(settings: Annotated[Settings, Depends(get_settings)]) -> H
 def init_host_metrics_recorder(settings: Settings) -> HostMetricsRecorder:
     global _metrics_recorder, _metrics, _metrics_store
     if _metrics is None:
-        _metrics = HostMetricsCollector(settings.host_proc, settings.policy.host_disk_paths)
+        _metrics = HostMetricsCollector(settings.host_proc, _metrics_disk_paths(settings))
     if _metrics_store is None:
         _metrics_store = HostMetricsStore(settings.host_metrics_db_path)
     if _metrics_recorder is None:
